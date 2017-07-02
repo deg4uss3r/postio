@@ -41,7 +41,7 @@ use s3::bucket::Bucket;
 //
 //  arn:aws:s3:::postio eu-west-2
 
-#[derive(Serialize,Deserialize,Debug)]
+#[derive(Serialize,Deserialize,Debug,Clone)]
 struct Config {
     email: String,
     private_key: String,
@@ -52,7 +52,7 @@ struct Config {
     public_key_store_region: String,
 }
 
-#[derive(Serialize,Deserialize,Debug)]
+#[derive(Serialize,Deserialize,Debug,Clone)]
 struct FileBlob {
     file: Vec<u8>,
     key: Vec<u8>,
@@ -376,6 +376,8 @@ fn create_file_on_aws(user: String, file_name: String, file: Vec<u8>, region_inp
 
     let bucket = Bucket::new(BUCKET, region, credentials);
 
+    add_users_folder(user, region_input, bucket_name.to_owned());
+
     let (_, code) = bucket.put(&user_sha_string, &file, "text/plain").unwrap();
 
     if  code == 200 {
@@ -501,4 +503,11 @@ fn main() {
             (_, _) => {create_postio_dir(); create_config(); read_config()},
         };
 
-}       
+        //testing encrypting and sending a file to the AWS
+       //Encrypting
+       let out_blob: FileBlob = aes_encrypter("./test_file".to_string(), postio_config.to_owned());
+       //serializing to sent to AWS (need Vec<u8>) 
+       let file_to_aws = toml::to_string(&out_blob).unwrap();
+       //sending to s3
+        create_file_on_aws("ricky.hosfelt@gmail.com".to_string(), "meh".to_string(), file_to_aws.as_bytes().to_vec(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
+}
