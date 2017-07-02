@@ -1,0 +1,12 @@
+[package]
+name = "postio"
+version = "0.1.0"
+authors = ["deg4uss3r <ricky@hosfelt.io>"]
+
+[dependencies]
+openssl = "*"
+toml = "*"
+serde_derive = "*"
+serde = "*"
+rand = "*"
+rust-s3 = {version = "*", path = "/Users/rthosfelt/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-s3-0.5.1/"}
