@@ -9,4 +9,4 @@ toml = "*"
 serde_derive = "*"
 serde = "*"
 rand = "*"
-rust-s3 = {version = "*", path = "/Users/rthosfelt/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-s3-0.5.1/"}
+rust-s3 = {version = "*", path = "./rust-s3-postio-custom/"}
