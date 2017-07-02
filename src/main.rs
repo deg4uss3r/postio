@@ -297,8 +297,9 @@ fn aes_decrypter(out_file_path: String, fileFromAWS: FileBlob, postio_config: Co
     let encrypted_key = fileFromAWS.key;
     let encrypted_iv = fileFromAWS.iv;
 
+    let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
 
-    let (key, iv) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
+    println!("key: {:?}\niv: {:?}", key, iv);
 
     let unencrypted =  openssl::symm::decrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &encrypted);
 
@@ -502,7 +503,7 @@ fn main() {
             (true, false) => {create_config(); read_config()},
             (_, _) => {create_postio_dir(); create_config(); read_config()},
         };
-
+/*
         //testing encrypting and sending a file to the AWS
        //Encrypting
        let out_blob: FileBlob = aes_encrypter("./test_file".to_string(), postio_config.to_owned());
@@ -510,4 +511,13 @@ fn main() {
        let file_to_aws = toml::to_string(&out_blob).unwrap();
        //sending to s3
         create_file_on_aws("ricky.hosfelt@gmail.com".to_string(), "meh".to_string(), file_to_aws.as_bytes().to_vec(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
+*/
+
+        //testing receiving file and decryption
+        //first get file from AWS store
+        let file_from_aws = aws_file_getter("meh".to_string(), "ricky.hosfelt@gmail.com".to_string(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
+        //deserializing
+        let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
+        //decrypting
+        aes_decrypter("maybe".to_string(), out, postio_config.to_owned()); 
 }
