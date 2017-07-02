@@ -197,7 +197,7 @@ fn create_config() {
 
     else {
         postio_key_store = "postio-keys".to_string();
-        postio_key_store_region = "eu-west-2".to_string();
+        postio_key_store_region = "eu-central-1".to_string();
     }
 
     let postio_config_content: Config = Config{email:user_email, private_key: private_key_path, public_key: public_key_path, file_store: postio_file_store, file_store_region: postio_file_store_region, public_key_store: postio_key_store, public_key_store_region: postio_key_store_region};
