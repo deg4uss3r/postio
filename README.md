@@ -1,61 +1,41 @@
-# Overview
+# Postio
+
+## Overview
+ Postio is a encrypted file sender and receiver. Written in [Rust](https://www.rust-lang.org/en-US/) Postio will encrypt a file (Using [AES-256](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) in [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29) mode and send this file to an [AWS S3](https://aws.amazon.com/s3/). The initialization vectory and symmetic key are also encryoted with [RSA-4096](https://en.wikipedia.org/wiki/RSA_(cryptosystem)) private/public keys. Your public key is sent to the AWS S3 store (differnt S3 instance) for the sender to get your public key to proply encrypt the file. 
+
 
 ## Command line options
- -i file -r user@email.com
+ -i file -u user@email.com
+    Uploads file for `-u` user
  -o get
+    Enters get mode which will list files to download, user will then select the file they wish to recvieve
  -o list
- Optional arg: -s sender's account (if you have multiple accounts set up)
- Optional arg: -a used to -o get all files at once
+    Just lists the files in your receive queue
+ Optional: --all
+    For use with `-o get` then proceeds to grab all files in queue
+ Optional: --config-location
+    Specify custom postio configuration location normally in `~/.postio/config`
 
-## Runthrough
+## Config File Structure
+Using [serde](https://crates.io/crates/serde) postio will parse the config file in toml format. 
 
-### on any launch
-    1) check for ~/.program_io.conf 
-        1a) should have email, public key, and private key location
-    2) if it does not exist go through steps to create it
-        2a) get users desired email address 
-        2b) generate keys (RAS2048) with approperate permissions 
-        2c) send public key to s3 bucket for keys
-    3) 
+The configure file should look like below: 
 
- when -i file -r user@email.com
-    1) check senders conf file
-        1a) if not present creat it
-    2) check user's email is in the S3 bucket for keys
-        2a) if not ask if you want to send unencrypted
-            2ai) if yes, create folder (sha256 masked), send file (TLS), send email to receiver
-            2aii) if no, invite user to create ~/.program_io.conf by sending email
-        2b) if yes, grab receiver's public key, generate AES symmetic key, encrypt file, encrypt AES key with RSA pub/private, send file to receiver's folder with symmetic key
-
- when -o get
-    1) list bucket contents
-    2) list file and sender
-        2a) give receiver option to get file, skip file, or delete file from bucket 
-            2ai) do this until a user gets a file or reaches the end
-            2aii) download file, senders public key, decrytp file
-        2b) unless -a is supplied then get all files
-
- when -o list
-    1) list bucket contents
-    2) list files and sender's email
+```
+email = "ricky@hosfelt.io"
+private_key = "/Users/rthosfelt/.postio/private_key.pem"
+public_key = "/Users/rthosfelt/.postio/public_key.pem"
+file_store = "postio"
+file_store_region = "eu-west-2"
+public_key_store = "postio-keys"
+public_key_store_region = "eu-central-1"
+```
 
 ## TODO!
+No particular order
 
-interface with S3
-    file sender
-    file getter
-    bucket lister
-        store files encyrpted with AES256 in storage (I heard you like AES so I AES'd your AES, dawg)
+- Arg parser
+- Allow user to specify custom location for config file
+- Write file lister
+- Write file selector
 
-key creation
-    RSA2048 for pub/private key (to encrypt symmetric key)
-    AES256 (512?) for file encyrption
-
-file encrypter
-    gets public key of user from S3, generate AES symmetic key, encypt file with symmetic key, encrypt symmetic key with RSA public and this private, send file to S3
-file decrypter 
-    gets RSA public key of sender from S3, decrypts AES symmetic key, decrypts file boom
-
-sha256 hashing on usernames for folders inside bucket
-sah256 sender-user-filename for symmetic key file 
-email interface to invite user, send notification of file ready to get
