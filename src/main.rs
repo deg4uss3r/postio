@@ -138,7 +138,7 @@ fn create_config() {
     let mut user_email = String::new();
     print!("Please enter the email address you wish to use: ");
     stdout().flush();  
-    stdin().read_line(&mut user_email);
+    stdin().read_line(&mut user_email).expect("Please enter a valid email address");
     user_email.trim();
     user_email.pop();
 
@@ -166,9 +166,14 @@ fn create_config() {
         postio_file_store_region.pop();
     }
 
-    else {
+    else if  postio_file_store_answer.to_uppercase() == "N".to_string() {
         postio_file_store = "postio".to_string();
         postio_file_store_region = "eu-west-2".to_string();
+    }
+
+    else {
+        println!("Expecting Y or N...");
+        exit(1);
     }
 
     let mut postio_key_store_answer = String::new();
@@ -195,20 +200,44 @@ fn create_config() {
         postio_key_store.pop();
     }
 
-    else {
+    else if postio_key_store_answer.to_uppercase() == "N".to_string() {
         postio_key_store = "postio-keys".to_string();
         postio_key_store_region = "eu-central-1".to_string();
     }
 
+    else {
+        println!("Expecting Y or N...");
+        exit(1);
+    }
+
     let postio_config_content: Config = Config{email:user_email, private_key: private_key_path, public_key: public_key_path, file_store: postio_file_store, file_store_region: postio_file_store_region, public_key_store: postio_key_store, public_key_store_region: postio_key_store_region};
 
+    //using new config to send public key to keystore
+    let user_name: String = postio_config_content.email.to_owned();
+    let pub_key_reg: String = postio_config_content.public_key_store_region.to_owned();
+    let pub_key_bucket: String = postio_config_content.public_key_store.to_owned();
+    
+    //adding user to database
+    add_users_folder(user_name.to_owned(), pub_key_reg.to_owned(), pub_key_bucket.to_owned());
+    
+    //opening public key
+    let mut pub_key = Vec::new();
+    let mut pub_key_file = File::open(postio_config_content.public_key.to_owned()).unwrap();
+        pub_key_file.read_to_end(&mut pub_key);
+    
+    //sending public key
+    create_file_on_aws(user_name.to_owned(), "public_key".to_string(), pub_key, pub_key_reg.to_owned(), pub_key_bucket.to_owned());
+
+    //serializing config file
     let postio = toml::to_string(&postio_config_content).unwrap();
 
+    //writing config file to ~/.postio
     let mut postio_config_file = File::create(postio_config_file_path).unwrap();
-    postio_config_file.write_all(&postio.as_bytes());
+        postio_config_file.write_all(&postio.as_bytes());
 }
 
 fn create_postio_dir() {
+    //create .postio directory in user's home 
     let home_dir = home_dir().unwrap();
     let postio_dir = home_dir.to_owned().join(".postio");
 
@@ -216,116 +245,112 @@ fn create_postio_dir() {
 }
 
 fn read_config() -> Config {
+    //safely getting home directory and postio config path (or at least where it should be)
     let home_dir = home_dir().unwrap();
     let postio_dir = home_dir.to_owned().join(".postio");
     let config_file_path = postio_dir.to_owned().join("config");
 
+    //opening and deserializing config
     let mut config_file_holder = File::open(&config_file_path).unwrap();
     let mut config_file = String::new();
-    config_file_holder.read_to_string(&mut config_file).unwrap();
+        config_file_holder.read_to_string(&mut config_file).unwrap();
 
     let postio_config = toml::from_str(&config_file);
 
-        match postio_config {
-            Err(e) => {
-                let mut delete_answer = String::new();
-                print!("Error in your config file, please check your settings!\n\tWould you like to delete the config file? [Y/N]: ");
-                stdout().flush();
-                stdin().read_line(&mut delete_answer);
-                delete_answer.trim();
-                delete_answer.pop();
+    //getting config file 
+    match postio_config {
+        Err(e) => {
+            let mut delete_answer = String::new();
+            print!("Error in your config file, please check your settings!\n\tWould you like to delete the config file? [Y/N]: ");
+            stdout().flush();
+            stdin().read_line(&mut delete_answer);
+            delete_answer.trim();
+            delete_answer.pop();
 
-                if delete_answer.to_uppercase() == "Y".to_string() {
-                    remove_file(&config_file_path).unwrap();
-                    println!("Config file deleted, run the program again to set it up!");
-                    exit(99);
-                }
-
-                else {
-                    println!("File not deleted please check your configurations: {}", e);
-                    exit(1);
-                }
-            },
-            Ok(config) => {
-                let mut pconfig: Config = config;
-                let user_name: String = pconfig.email.to_owned();
-                let pub_key_reg: String = pconfig.public_key_store_region.to_owned();
-                let pub_key_bucket: String = pconfig.public_key_store.to_owned();
-
-                add_users_folder(user_name.to_owned(), pub_key_reg.to_owned(), pub_key_bucket.to_owned());
-
-                let mut pub_key = Vec::new();
-                let mut pub_key_file = File::open(pconfig.public_key.to_owned()).unwrap();
-                    pub_key_file.read_to_end(&mut pub_key);
-
-                create_file_on_aws(user_name.to_owned(), "public_key".to_string(), pub_key, pub_key_reg.to_owned(), pub_key_bucket.to_owned());
-
-                return pconfig;
+            if delete_answer.to_uppercase() == "Y".to_string() {
+                remove_file(&config_file_path).unwrap();
+                println!("Config file deleted, run the program again to set it up!");
+                exit(99);
             }
+
+            else {
+                println!("File not deleted please check your configurations: {}", e);
+                exit(1);
+            }
+        },
+            
+        Ok(config) => {
+            return config;
         }
+    }
 }
 
-fn aes_encrypter(file_path: String, pconfig: Config) -> FileBlob {
+fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
     let mut key = Vec::new();
-
     let mut rng = rand::thread_rng(); 
-
+    
+    //randomizing IV (16 bytes)
     for _ in 0..16 {
         iv.push(rng.gen::<u8>());
     }
-
+    //randomizing symmetic key (32 bytes)
     for _ in 0..32 {
         key.push(rng.gen::<u8>());
     }
 
+    //opening file to encrypt
     let mut unencrypted_file = File::open(file_path).unwrap();
     let mut file_buffer = Vec::new();
-    unencrypted_file.read_to_end(&mut file_buffer);
+        unencrypted_file.read_to_end(&mut file_buffer);
 
     let encrypted_file = openssl::symm::encrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &file_buffer);
     
-    let (encrypted_key, encrypted_iv) = rsa_encrypter(pconfig, iv, key);
+    //encrypying IV,Key with public key of receiver
+    let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
 
+    //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
     let fileBlobForAWS: FileBlob = FileBlob{file: encrypted_file.unwrap(), key: encrypted_key, iv: encrypted_iv};
 
+    //return blob
     fileBlobForAWS
 }
 
 fn aes_decrypter(out_file_path: String, fileFromAWS: FileBlob, postio_config: Config) {
+    //disecting fileblob from AWS
     let encrypted = fileFromAWS.file;
     let encrypted_key = fileFromAWS.key;
     let encrypted_iv = fileFromAWS.iv;
 
+    //decrypting IV,Key with private certificates
     let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
 
-    println!("key: {:?}\niv: {:?}", key, iv);
-
+    //decrypting file with iv,key
     let unencrypted =  openssl::symm::decrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &encrypted);
 
+    //writing file out
     let mut decrypted_file_path = File::create(out_file_path).unwrap();
-    decrypted_file_path.write_all(&unencrypted.unwrap());
+        decrypted_file_path.write_all(&unencrypted.unwrap());
 }
 
-fn rsa_encrypter(pconfig: Config, unencrypted_iv: Vec<u8>, unencrypted_key: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
+fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, unencrypted_key: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
+    //setting output buffer to write encrypted files to
     let mut enc_buffer_iv = [0u8;512];  //16 bytes
     let mut enc_buffer_key = [0u8;512]; //32 bytes
 
-    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
-    let mut user_sha_string = vec_to_hex_string(user_sha_vec);
-    user_sha_string+="/public_key";
+    //getting public key of receiver
+    let public_key = aws_file_getter("public_key".to_string(), to_user, pconfig.public_key_store_region, pconfig.public_key_store);
 
-    let public_key = aws_file_getter("public_key".to_string(), pconfig.email, pconfig.public_key_store_region, pconfig.public_key_store);
-
+    //opening your private key
     let mut pv_key = File::open(pconfig.private_key).unwrap();
     let mut private_key: Vec<u8> = Vec::new();
         pv_key.read_to_end(&mut private_key);
 
+    //enabling keys with openssl for RSA decryption
+    let mut keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
+    keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
 
-    let mut keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
-    keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-
+    //encrypting IV,Keys
     let iv_out = keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, openssl::rsa::PKCS1_OAEP_PADDING);
     let key_out = keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, openssl::rsa::PKCS1_OAEP_PADDING);
 
@@ -333,26 +358,30 @@ fn rsa_encrypter(pconfig: Config, unencrypted_iv: Vec<u8>, unencrypted_key: Vec<
 }
 
 fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_decrypt: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
+    //opening your private key to decrypt IV,Key
     let mut private_key_file = File::open(private_key_path).unwrap();
     let mut private_key: Vec<u8> = Vec::new();
-    private_key_file.read_to_end(&mut private_key);
+        private_key_file.read_to_end(&mut private_key);
     
     let keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
 
+    //buffer for decrypted iv,keys
     let mut decrypted_iv = [0u8;512]; //16
     let mut decrypted_key = [0u8;512]; //32
 
+    //decrypting and truncated buffer to original lengths
     let file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, openssl::rsa::PKCS1_OAEP_PADDING);
-    let decrypted_iv_trunct: Vec<u8> = decrypted_iv[0..16].to_vec();
+        let decrypted_iv_trunct: Vec<u8> = decrypted_iv[0..16].to_vec();
 
     let file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, openssl::rsa::PKCS1_OAEP_PADDING);
-    let decrypted_key_trunct: Vec<u8> = decrypted_key[0..32].to_vec();
+        let decrypted_key_trunct: Vec<u8> = decrypted_key[0..32].to_vec();
 
     (decrypted_iv_trunct, decrypted_key_trunct)
 }
 
 
 fn open_file(file_path: String) -> Vec<u8> {
+    //safe file opener
     let mut out_file: Vec<u8> = Vec::new();
     let mut file = File::open(file_path).expect("Problems with the file path you gave");
 
@@ -362,19 +391,21 @@ fn open_file(file_path: String) -> Vec<u8> {
 }
 
 fn load_aws_credentials() -> Credentials {
+    //loads aws creds from Bash enviromental variables
     let aws_access = env::var("AWS_ACCESS_KEY_ID").expect("Must specify AWS_ACCESS_KEY_ID");
     let aws_secret = env::var("AWS_SECRET_ACCESS_KEY").expect("Must specify AWS_SECRET_ACCESS_KEY");
 
+    //returns credtials type for rust-s3
     Credentials::new(&aws_access, &aws_secret, None)
 }
 
 fn create_file_on_aws(user: String, file_name: String, file: Vec<u8>, region_input: String, bucket_name: String) {
+    //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
-    let blank = String::new();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
-    user_sha_string+="/";
-    user_sha_string+=&file_name;
+        user_sha_string+="/";
+            user_sha_string+=&file_name;
 
     let credentials = load_aws_credentials();
 
@@ -387,21 +418,19 @@ fn create_file_on_aws(user: String, file_name: String, file: Vec<u8>, region_inp
 
     let (_, code) = bucket.put(&user_sha_string, &file, "text/plain").unwrap();
 
-    if  code == 200 {
-        println!("File transfer successfully");
-    }
-    else {
+    if  code != 200 {
         println!("Sorry there was an error putting this file in the S3 HTTP code: {}", code);
-
     }
 }
 
 fn add_users_folder(user: String, region_input: String, bucket_name: String) {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
-    let blank = String::new();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string+="/";
+
+    //using a blank string to add a folder
+    let blank = String::new();
 
     let credentials = load_aws_credentials();
 
@@ -421,7 +450,6 @@ fn add_users_folder(user: String, region_input: String, bucket_name: String) {
 fn list_files_in_folder(user: String, region_input: String, bucket_name: String) {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
-    let blank = String::new();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string+="/";
 
@@ -437,28 +465,30 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String)
     if code != 200 {
         println!("AWS error: HTTP code: {}", code);
     }
-
+    
+    //checking if there is a folder with the specified username
     if list.contents.len() == 0 {
         println!("Error: Your username wasn't found, this shouldn't happen logically");
     }
+
     else {
-        list.contents.remove(0);
-        if code != 200 {
+        list.contents.remove(0); //removing the first result which is the folder
+        if code != 200 { 
             println!("Sorry there was an error adding this user folder to the S3 HTTP code: {}", code);
         }
     
         else {
-            if list.contents.len() == 0 {
+            if list.contents.len() == 0 { //after we remove the first if there none, no files
                 println!("No files to get!");
             }
             else {
-                for (file_count, file_name) in list.contents.iter().enumerate() {
+                for (file_count, file_name) in list.contents.iter().enumerate() { //for each file print the file name 
                     match file_name.key.clone() {
                         Some(b) => {
-                            let mut paths: Vec<&str> = b.split("/").collect();
-                            println!("{}) {}\n", file_count, paths[1]);
+                            let mut paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it
+                            println!("{}) {}\n", file_count, paths[1]); //will only every be one folder deep by design
                         },
-                        None => println!("No files exist!")
+                        None => println!("Error No file exists here!") //should not get an error if there's a file that exists possibly a string error
                     }
                 }
             }
@@ -467,6 +497,7 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String)
 }
 
 fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
+    //formats a vector of u8s to padded hex string for storing username
     let mut out_string = String::new();
 
     for i in hex_vec {
@@ -502,23 +533,25 @@ fn aws_file_getter(file_name: String, username: String, file_region: String, buc
 
 
 fn main() {
+        //checking for configuration files
         let config_results = check_for_config();
 
+        //if the config exists read it if not create directory and the file
         let postio_config: Config = match config_results {
             (true, true) => read_config(),
             (true, false) => {create_config(); read_config()},
             (_, _) => {create_postio_dir(); create_config(); read_config()},
         };
-/*
+
         //testing encrypting and sending a file to the AWS
        //Encrypting
-       let out_blob: FileBlob = aes_encrypter("./test_file".to_string(), postio_config.to_owned());
+       let out_blob: FileBlob = aes_encrypter("./test_file".to_string(), postio_config.to_owned(), "ricky.hosfelt@gmail.com".to_string());
        //serializing to sent to AWS (need Vec<u8>) 
        let file_to_aws = toml::to_string(&out_blob).unwrap();
        //sending to s3
         create_file_on_aws("ricky.hosfelt@gmail.com".to_string(), "meh".to_string(), file_to_aws.as_bytes().to_vec(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
-*/
 
+/*
         //testing receiving file and decryption
         //first get file from AWS store
         let file_from_aws = aws_file_getter("meh".to_string(), "ricky.hosfelt@gmail.com".to_string(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
@@ -526,4 +559,5 @@ fn main() {
         let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
         //decrypting
         aes_decrypter("maybe".to_string(), out, postio_config.to_owned()); 
+    */
 }
