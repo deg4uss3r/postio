@@ -318,7 +318,13 @@ fn rsa_encrypter(pconfig: Config, unencrypted_iv: Vec<u8>, unencrypted_key: Vec<
 
     let public_key = aws_file_getter("public_key".to_string(), pconfig.email, pconfig.public_key_store_region, pconfig.public_key_store);
 
-    let mut keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap(); 
+    let mut pv_key = File::open(pconfig.private_key).unwrap();
+    let mut private_key: Vec<u8> = Vec::new();
+        pv_key.read_to_end(&mut private_key);
+
+
+    let mut keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
+    keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
 
     let iv_out = keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, openssl::rsa::PKCS1_OAEP_PADDING);
     let key_out = keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, openssl::rsa::PKCS1_OAEP_PADDING);
