@@ -11,7 +11,7 @@
     
  -o get
  
-    Enters get mode which will list files to download, user will then select the file they wish to recvieve
+    Enters get mode which will list files to download, user will then select the file they wish to receive
     
  -o list
  
