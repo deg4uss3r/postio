@@ -40,6 +40,14 @@ public_key_store = "postio-keys"
 public_key_store_region = "eu-central-1"
 ```
 
+##Contact
+Feel free to put in a ticket for any issues in the code or to call me names.
+
+Email: ricky<a>hosfelt.io
+IRC: degausser (freenode and Mozilla)
+
+Software will remain free but be a good sport and buy me a beer/coffee BTC: `1HJL1PMXi7rgALSo5cPLnRxhdPLBQDjQhd`
+
 ## TODO!
 No particular order:
 

@@ -7,15 +7,13 @@ extern crate rand;
 extern crate s3;
 
 use openssl::*;
-use std::env::args;
 use std::fs::{File, create_dir, Permissions, remove_file};
 use std::os::unix::fs::PermissionsExt;
 use std::io::{Write, stdin, stdout};
 use std::io::prelude::*;
 use toml::*;
-use std::env::{home_dir};
+use std::env::{home_dir, args, var};
 use std::path::{PathBuf, Path};
-use std::env;
 use std::str;
 use std::process::exit;
 use rand::Rng;
@@ -392,8 +390,8 @@ fn open_file(file_path: String) -> Vec<u8> {
 
 fn load_aws_credentials() -> Credentials {
     //loads aws creds from Bash enviromental variables
-    let aws_access = env::var("AWS_ACCESS_KEY_ID").expect("Must specify AWS_ACCESS_KEY_ID");
-    let aws_secret = env::var("AWS_SECRET_ACCESS_KEY").expect("Must specify AWS_SECRET_ACCESS_KEY");
+    let aws_access = var("AWS_ACCESS_KEY_ID").expect("Must specify AWS_ACCESS_KEY_ID");
+    let aws_secret = var("AWS_SECRET_ACCESS_KEY").expect("Must specify AWS_SECRET_ACCESS_KEY");
 
     //returns credtials type for rust-s3
     Credentials::new(&aws_access, &aws_secret, None)
@@ -531,27 +529,37 @@ fn aws_file_getter(file_name: String, username: String, file_region: String, buc
     }
 }
 
+fn help() {
+    println!("postio:\n\n\t-i /path/to/file -u user@gmail.com\n\t-o [get|list]\n\t\tOptional: --all used to get all files in queue at once\n");
+}
 
-fn main() {
-        //checking for configuration files
-        let config_results = check_for_config();
+fn send_file(sending_file_path: String, to_user: String, pconfig: Config) {
+    println!("Testing send files");
 
-        //if the config exists read it if not create directory and the file
-        let postio_config: Config = match config_results {
-            (true, true) => read_config(),
-            (true, false) => {create_config(); read_config()},
-            (_, _) => {create_postio_dir(); create_config(); read_config()},
-        };
+    //encrypting and sending a file to the AWS
+    //Encrypting
+    let out_blob: FileBlob = aes_encrypter(sending_file_path.to_owned(), pconfig.to_owned(), to_user.to_owned());
 
-        //testing encrypting and sending a file to the AWS
-       //Encrypting
-       let out_blob: FileBlob = aes_encrypter("./test_file".to_string(), postio_config.to_owned(), "ricky.hosfelt@gmail.com".to_string());
-       //serializing to sent to AWS (need Vec<u8>) 
-       let file_to_aws = toml::to_string(&out_blob).unwrap();
-       //sending to s3
-        create_file_on_aws("ricky.hosfelt@gmail.com".to_string(), "meh".to_string(), file_to_aws.as_bytes().to_vec(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
+    //serializing to sent to AWS (need Vec<u8>) 
+    let file_to_aws = toml::to_string(&out_blob).unwrap();
 
-/*
+    let file_name_list: Vec<&str> = sending_file_path.split("/").collect();
+    let file_name_st = file_name_list[file_name_list.len()-1].to_string();
+
+    //sending to s3
+    create_file_on_aws(to_user, file_name_st, file_to_aws.as_bytes().to_vec(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
+}
+
+fn get_file(action: String, all: bool, pconfig: Config) {
+    println!("Testing get files");
+
+    if action.to_lowercase() == "get".to_string() {
+        if all == true {
+
+        }
+
+        else {
+    /*
         //testing receiving file and decryption
         //first get file from AWS store
         let file_from_aws = aws_file_getter("meh".to_string(), "ricky.hosfelt@gmail.com".to_string(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
@@ -560,4 +568,77 @@ fn main() {
         //decrypting
         aes_decrypter("maybe".to_string(), out, postio_config.to_owned()); 
     */
+    }
+
+    }
+
+    if action.to_lowercase() == "list".to_string() {
+
+    }
+}
+
+fn arg_parser(pconfig: Config) {
+
+    let arg_list: Vec<String> = args().collect();
+
+    match arg_list.len() {
+        5 => {
+            let file_index_test = arg_list.iter().position(|r| r == "-i");
+            let user_index_test = arg_list.iter().position(|r| r == "-u");
+
+            let (file_index, user_index) = match (file_index_test, user_index_test) {
+                (Some(x), Some(y)) => (x+1, y+1),
+                (Some(x), None) => {println!("<<Missing user to send file to>>"); help(); exit(1);},
+                (None, Some(y)) => {println!("<<Missing file to send>>"); help(); exit(1);},
+                (_, _) => {println!("<<Improperly formatted argument>>"); help(); exit(1);},
+            };
+
+            send_file(arg_list[file_index].to_owned(), arg_list[user_index].to_owned(), pconfig);
+        },
+
+        3 => {
+    
+            let action_index_test = arg_list.iter().position(|r| r == "-o");
+
+            let action_index = match action_index_test {
+                Some(x) => x+1,
+                None => {println!("<<excepted -o [get|list]>>"); help(); exit(1);},
+            };
+
+            get_file(arg_list[action_index].to_owned(), false, pconfig);
+        },
+
+        4 => {
+            let action_index_test = arg_list.iter().position(|r| r == "-o");
+            let expect_subaction_index = arg_list.iter().position(|r| r == "--all");
+
+            let action_index = match (action_index_test, expect_subaction_index) {
+                (Some(x), Some(y)) => x+1,
+                (Some(x), None) => {println!("<<Expected --all as the argument that follows -o [get|list]"); help(); exit(1);},
+                (None, Some(y)) => {println!("<<Expect -o [get|list]>>"); help(); exit(1);},
+                (None, None) => {println!("<<Improperly formatted argument>>"); help(); exit(1);},
+            };
+
+            get_file(arg_list[action_index].to_owned(), true, pconfig);
+        },
+
+        _ => help(),
+    }
+
+}
+
+
+fn main() {
+    //checking for configuration files
+    let config_results = check_for_config();
+
+    //if the config exists read it if not create directory and the file
+    let postio_config: Config = match config_results {
+        (true, true) => read_config(),
+        (true, false) => {create_config(); read_config()},
+        (_, _) => {create_postio_dir(); create_config(); read_config()},
+    };
+
+    arg_parser(postio_config);
+
 }
