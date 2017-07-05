@@ -20,24 +20,10 @@ use rand::Rng;
 use s3::credentials::Credentials;
 use s3::bucket::Bucket;
 
-//everything works! 
-//
-//need to: 
-//  Clean up code!
-//  create serde struct for file, key, iv to store in S3 :)
-//  serialize on send 
-//  deserialize on receive 
-//  add S3 instance to postio config
-//  start up S3 for files
-//  start up S3 for IVs/Keys
-//  create file senders
-//  create file receivers
-//  create file listers
-//  create folder creaters
-//  create file deleters
-//  finally create server host on Digital Ocean to interface with the S3
-//
-//  arn:aws:s3:::postio eu-west-2
+//make file deleter
+//after you get a file remove it
+////option to not remove it?
+//loop over files in list
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
 struct Config {
@@ -445,11 +431,13 @@ fn add_users_folder(user: String, region_input: String, bucket_name: String) {
     }
 }
 
-fn list_files_in_folder(user: String, region_input: String, bucket_name: String) {
+fn list_files_in_folder(user: String, region_input: String, bucket_name: String, listing: bool) -> Vec<String> {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string+="/";
+
+    let mut output_list: Vec<String> = Vec::new();
 
     let credentials = load_aws_credentials();
 
@@ -483,8 +471,11 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String)
                 for (file_count, file_name) in list.contents.iter().enumerate() { //for each file print the file name 
                     match file_name.key.clone() {
                         Some(b) => {
-                            let mut paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it
-                            println!("{}) {}\n", file_count, paths[1]); //will only every be one folder deep by design
+                            let mut paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it                            
+                            output_list.push(paths[1].to_string());
+                            if listing == true {
+                                println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
+                            }
                         },
                         None => println!("Error No file exists here!") //should not get an error if there's a file that exists possibly a string error
                     }
@@ -492,6 +483,8 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String)
             }
         }
     }
+
+    output_list
 }
 
 fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
@@ -503,6 +496,37 @@ fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
     }
 
     out_string
+}
+
+fn aws_file_deleter(user: String, region_input: String, bucket_name: String, file_name: String) {
+    //SHA512 username and emails (no crawling for emails here if we're using public S3s
+    let user_sha = sha::sha512(user.to_lowercase().as_bytes());
+    let user_sha_vec = user_sha.to_vec();
+    let mut user_sha_string = vec_to_hex_string(user_sha_vec);
+        user_sha_string+="/";
+            user_sha_string+=&file_name;
+
+    let credentials = load_aws_credentials();
+
+    let region = region_input.parse().unwrap();
+    let BUCKET = &bucket_name;
+
+    let bucket = Bucket::new(BUCKET, region, credentials);
+
+    let out = bucket.delete(&user_sha_string);
+
+    match out {
+        Ok(code) => {
+            if code.1 != 200 {
+                println!("Deletion of file failed! You'll want to check your bucket settings most likely");
+                exit(1);
+            }
+        },
+        Err(e) => {
+                println!("Deletion of file failed! {}", e);
+                exit(1);
+        }
+    }
 }
 
 fn aws_file_getter(file_name: String, username: String, file_region: String, bucket_name: String) -> Vec<u8> {
@@ -555,25 +579,72 @@ fn get_file(action: String, all: bool, pconfig: Config) {
 
     if action.to_lowercase() == "get".to_string() {
         if all == true {
+            let file_list: Vec<String> =  list_files_in_folder(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), false);
+            
+            for i in file_list.iter() {
+                //testing receiving file and decryption
+                //first get file from AWS store
+                let file_from_aws = aws_file_getter(i.to_owned(), pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
 
+                //removing file from AWS 
+                aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), i.to_owned()); //create an option to keep this
+                
+                //deserializing
+                let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
+                
+                //decrypting
+                aes_decrypter(i.to_owned(), out, pconfig.to_owned());                 
+            }
         }
 
         else {
-    /*
-        //testing receiving file and decryption
-        //first get file from AWS store
-        let file_from_aws = aws_file_getter("meh".to_string(), "ricky.hosfelt@gmail.com".to_string(), postio_config.file_store_region.to_owned(), postio_config.file_store.to_owned());
-        //deserializing
-        let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
-        //decrypting
-        aes_decrypter("maybe".to_string(), out, postio_config.to_owned()); 
-    */
-    }
+            let file_list: Vec<String> =  list_files_in_folder(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), false);
+
+            for (count, i) in file_list.iter().enumerate() {
+                println!("{}) {}", count, i);
+            }
+
+            let mut file_to_get_index_str = String::new();
+            print!("Please select a file (number) you wish to get: ");
+            stdout().flush();
+            stdin().read_line(&mut file_to_get_index_str);
+             file_to_get_index_str.trim();
+             file_to_get_index_str.pop();
+
+            let file_to_get_index = file_to_get_index_str.parse::<usize>().expect("I expected the index of the file..");
+
+            if file_to_get_index > file_list.len() {
+                println!("You can't count");
+                exit(1);
+            }
+
+            else {
+                //testing receiving file and decryption
+                //first get file from AWS store
+                let file_from_aws = aws_file_getter(file_list[file_to_get_index].to_owned(), pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
+
+                //removing file from AWS 
+                aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), file_list[file_to_get_index].to_owned()); //create an option to keep this
+                
+                //deserializing
+                let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
+                
+                //decrypting
+                aes_decrypter(file_list[file_to_get_index].to_owned(), out, pconfig.to_owned()); 
+            }
+        }
 
     }
 
-    if action.to_lowercase() == "list".to_string() {
+    else if action.to_lowercase() == "list".to_string() {
+        let file_list: Vec<String> = list_files_in_folder(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), true);
 
+        //jump into get if user would like
+    }
+
+    else {
+        println!("Sorry only get or list are accepted for -o");
+        exit(1);
     }
 }
 
