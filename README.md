@@ -19,8 +19,8 @@ export AWS_SECRET_ACCESS_KEY="your_secret_access_here"
 After that and you have a working binary you are good to go!
 
 By the way, you can grab the pre-compiled binaries here: 
-- [MacOS](://s3-eu-west-1.amazonaws.com/postio-binary/x86_64-MacOS.tar)
-- [CentOS]()
+- [MacOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86_64-MacOS.tar)
+- [CentOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86_64-Linux.tar)
 
 More binaries are coming once I can set up a proper test suite for the different OSs. :)
 
