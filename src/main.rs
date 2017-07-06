@@ -517,7 +517,7 @@ fn aws_file_deleter(user: String, region_input: String, bucket_name: String, fil
 
     match out {
         Ok(code) => {
-            if code.1 != 200 {
+            if code.1 != 204 {
                 println!("Deletion of file failed! You'll want to check your bucket settings most likely: HTTP code: {}", code.1);
                 exit(1);
             }
