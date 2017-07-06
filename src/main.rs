@@ -20,11 +20,6 @@ use rand::Rng;
 use s3::credentials::Credentials;
 use s3::bucket::Bucket;
 
-//make file deleter
-//after you get a file remove it
-////option to not remove it?
-//loop over files in list
-
 #[derive(Serialize,Deserialize,Debug,Clone)]
 struct Config {
     email: String,
@@ -426,7 +421,7 @@ fn add_users_folder(user: String, region_input: String, bucket_name: String) {
     let response = bucket.list(&user_sha_string, Some(""));
     
     match response {
-        Ok(x) => println!("User folder exists :)"),
+        Ok(x) => println!("\nUser directory found!\n"),
         Err(e) => {let (_, code) = bucket.put(&user_sha_string, &blank.as_bytes(), "text/plain").unwrap();},
     }
 }
@@ -446,7 +441,14 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
 
     let mut bucket = Bucket::new(BUCKET, region, credentials);
 
-    let (mut list, code) = bucket.list(&user_sha_string, Some("/")).expect("No files in folder");
+    let (mut list,code) = match bucket.list(&user_sha_string, Some("/")) {
+        Ok(x) => (x.0, x.1),
+        Err(e) => {
+            add_users_folder(user.to_owned(), region_input.to_owned(), bucket_name.to_owned());
+            println!("Your username wasn't found on the S3, so I added it for you :), now have a friend send you a file\n");
+            exit(2);
+        }
+    };
     
     if code != 200 {
         println!("AWS error: HTTP code: {}", code);
@@ -454,7 +456,7 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
     
     //checking if there is a folder with the specified username
     if list.contents.len() == 0 {
-        println!("Error: Your username wasn't found, this shouldn't happen logically");
+        println!("Error: the folder was not accessible, or was deleted");
     }
 
     else {
@@ -477,7 +479,7 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
                                 println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
                             }
                         },
-                        None => println!("Error No file exists here!") //should not get an error if there's a file that exists possibly a string error
+                        None => println!("Error no file exists here!") //should not get an error if there's a file that exists possibly a string error
                     }
                 }
             }
@@ -558,7 +560,7 @@ fn help() {
 }
 
 fn send_file(sending_file_path: String, to_user: String, pconfig: Config) {
-    println!("Testing send files");
+    println!("Sending files:\n");
 
     //encrypting and sending a file to the AWS
     //Encrypting
@@ -575,7 +577,7 @@ fn send_file(sending_file_path: String, to_user: String, pconfig: Config) {
 }
 
 fn get_file(action: String, all: bool, pconfig: Config) {
-    println!("Testing get files");
+    println!("Getting files:\n");
 
     if action.to_lowercase() == "get".to_string() {
         if all == true {
@@ -611,7 +613,7 @@ fn get_file(action: String, all: bool, pconfig: Config) {
              file_to_get_index_str.trim();
              file_to_get_index_str.pop();
 
-            let file_to_get_index = file_to_get_index_str.parse::<usize>().expect("I expected the index of the file..");
+            let file_to_get_index = file_to_get_index_str.parse::<usize>().expect("I expected the index of the file...");
 
             if file_to_get_index > file_list.len() {
                 println!("You can't count");
