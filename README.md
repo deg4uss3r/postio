@@ -7,7 +7,7 @@
 First you can clone the git repo and build yourself. 
 - Current the code compiles on Mac OSX (10.12.5 Sierra), and CentOS 7.
 - Be sure to use the modified rust-s3 library in the repository as it turns several fields optional, there is a [pull request](https://github.com/durch/rust-s3/pull/13) in to do this same thing. 
-You'll need OpenSSL (for the crypto bindings) to compile.
+- You'll need OpenSSL (for the crypto bindings) to compile.
 
 Next, you'll want to add your AWS key ID and secret access key in your environment. You can do this in unix by adding this to your `.bashrc` or `.bash_profile` and running `source ~/.bashrc`or `source ~/.bash_profile` or by adding these to the terminal you currently have open:
 
