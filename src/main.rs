@@ -446,7 +446,7 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
 
     let mut bucket = Bucket::new(BUCKET, region, credentials);
 
-    let (mut list, code) = bucket.list(&user_sha_string, Some("/")).unwrap();
+    let (mut list, code) = bucket.list(&user_sha_string, Some("/")).expect("No files in folder");
     
     if code != 200 {
         println!("AWS error: HTTP code: {}", code);
@@ -518,7 +518,7 @@ fn aws_file_deleter(user: String, region_input: String, bucket_name: String, fil
     match out {
         Ok(code) => {
             if code.1 != 200 {
-                println!("Deletion of file failed! You'll want to check your bucket settings most likely");
+                println!("Deletion of file failed! You'll want to check your bucket settings most likely: HTTP code: {}", code.1);
                 exit(1);
             }
         },
