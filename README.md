@@ -56,6 +56,14 @@ public_key_store = "postio-keys"
 public_key_store_region = "eu-central-1"
 ```
 
+On the first run the program will set up the config file for you, including generating the RSA private/public keys. You can also generate these on your own:
+
+```
+openssl genrsa -des3 -out private.pem 4096
+openssl rsa -in private.pem -outform PEM -pubout -out public.pem
+```
+
+
 ##Contact
 Feel free to put in a ticket for any issues in the code or to call me names.
 
