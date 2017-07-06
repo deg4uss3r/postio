@@ -1,7 +1,7 @@
 # Postio
 
 ## Overview
- Postio is a encrypted file sender and receiver. Written in [Rust](https://www.rust-lang.org/en-US/) Postio will encrypt a file (Using [AES-256](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) in [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29) mode and send this file to an [AWS S3](https://aws.amazon.com/s3/). The initialization vector (IV) and symmetic key are also encryoted with [RSA-4096](https://en.wikipedia.org/wiki/RSA_(cryptosystem)) private/public keys. Your public key is sent to the AWS S3 store (differnt S3 instance) for the sender to get your public key to proply encrypt the file. 
+ Postio is a encrypted file sender and receiver. Written in [Rust](https://www.rust-lang.org/en-US/) Postio will encrypt a file (Using [AES-256](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) in [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29) mode) and send this file to an [AWS S3](https://aws.amazon.com/s3/). The initialization vector (IV) and symmetric key are also encrypted with [RSA-4096](https://en.wikipedia.org/wiki/RSA_(cryptosystem)) private/public keys. Your public key is sent to the AWS S3 store (different S3 instance) for the sender to get your public key to properly encrypt the file. 
 
 ## How to Install
 First you can clone the git repo and build yourself. 
@@ -41,10 +41,6 @@ More binaries are coming once I can set up a proper test suite for the different
  
     For use with `-o get` then proceeds to grab all files in queue
     
- Optional: --config-location
- 
-    Specify custom postio configuration location normally in `~/.postio/config`
-
 ## Config File Structure
 Using [serde](https://crates.io/crates/serde) postio will parse the config file in toml format. 
 
@@ -72,10 +68,11 @@ Software will remain free but be a good sport and buy me a beer/coffee BTC: `1HJ
 No particular order:
 
 - Give user a `--no-delete` option to keep files on the AWS S3
+- Give user a `--config-location` option to allow for multiple/different config file locations (default ~/.postio/config)
 - Bump code to be less messy after testing 
 - Get user feedback :)
 
 ## Licensing and Warnings
-I take no responsibily for getting your files stolen/deleted/hacked/cracked/etc. Also _please_ make sure you set up your AWS instance correctly or someone can run up the charges on your instance! Be smart, be secure!
+I take no responsibly for getting your files stolen/deleted/hacked/cracked/etc. Also _please_ make sure you set up your AWS instance correctly or someone can run up the charges on your instance! Be smart, be secure!
 
 Covered under the MIT license (C) Hosfelt.io
