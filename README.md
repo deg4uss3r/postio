@@ -64,7 +64,7 @@ openssl rsa -in private.pem -outform PEM -pubout -out public.pem
 ```
 
 
-##Contact
+## Contact
 Feel free to put in a ticket for any issues in the code or to call me names.
 
 Email: ricky<a>hosfelt.io
