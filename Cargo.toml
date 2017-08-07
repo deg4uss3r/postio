@@ -9,4 +9,4 @@ toml = "*"
 serde_derive = "*"
 serde = "*"
 rand = "*"
-rust-s3 = {version = "*", path = "./rust-s3-postio-custom/"}
+rust-s3 = "*"

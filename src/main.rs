@@ -472,14 +472,14 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
             else {
                 for (file_count, file_name) in list.contents.iter().enumerate() { //for each file print the file name 
                     match file_name.key.clone() {
-                        Some(b) => {
+                        b => {
                             let mut paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it                            
                             output_list.push(paths[1].to_string());
                             if listing == true {
                                 println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
                             }
                         },
-                        None => println!("Error no file exists here!") //should not get an error if there's a file that exists possibly a string error
+                        _ => println!("Error no file exists here!") //should not get an error if there's a file that exists possibly a string error
                     }
                 }
             }
