@@ -309,7 +309,7 @@ fn aes_decrypter(out_file_path: String, fileFromAWS: FileBlob, postio_config: Co
 
     //writing file out
     let mut decrypted_file_path = File::create(out_file_path).unwrap();
-        decrypted_file_path.write_all(&unencrypted.unwrap());
+        decrypted_file_path.write_all(&unencrypted.unwrap()).expect("unable to write encrypted file");
 }
 
 fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, unencrypted_key: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
@@ -340,7 +340,7 @@ fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_decryp
     //opening your private key to decrypt IV,Key
     let mut private_key_file = File::open(private_key_path).unwrap();
     let mut private_key: Vec<u8> = Vec::new();
-        private_key_file.read_to_end(&mut private_key);
+        private_key_file.read_to_end(&mut private_key).expect("Not able to read private key!");
     
     let keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
 
@@ -389,9 +389,8 @@ fn create_file_on_aws(user: String, file_name: String, file: Vec<u8>, region_inp
     let credentials = load_aws_credentials();
 
     let region = region_input.parse().unwrap();
-    let BUCKET = &bucket_name;
 
-    let bucket = Bucket::new(BUCKET, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials);
 
     add_users_folder(user, region_input, bucket_name.to_owned());
 
@@ -414,9 +413,8 @@ fn add_users_folder(user: String, region_input: String, bucket_name: String) {
     let credentials = load_aws_credentials();
 
     let region = region_input.parse().unwrap();
-    let BUCKET = &bucket_name;
 
-    let mut bucket = Bucket::new(BUCKET, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials);
 
     let response = bucket.list(&user_sha_string, Some(""));
     
@@ -437,18 +435,21 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
     let credentials = load_aws_credentials();
 
     let region = region_input.parse().unwrap();
-    let BUCKET = &bucket_name;
 
-    let mut bucket = Bucket::new(BUCKET, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials);
 
-    let (mut list,code) = match bucket.list(&user_sha_string, Some("/")) {
-        Ok(x) => (x.0, x.1),
+    let user_name_result = match bucket.list(&user_sha_string, Some("/")) {
+        Ok(x) => (x),
         Err(e) => {
             add_users_folder(user.to_owned(), region_input.to_owned(), bucket_name.to_owned());
             println!("Your username wasn't found on the S3, so I added it for you :), now have a friend send you a file\n");
             exit(2);
         }
     };
+
+    let code = user_name_result[0].1;
+    let bucket_list_result = &user_name_result[0].clone();
+    let mut list = bucket_list_result.0.clone();
     
     if code != 200 {
         println!("AWS error: HTTP code: {}", code);
@@ -473,7 +474,7 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
                 for (file_count, file_name) in list.contents.iter().enumerate() { //for each file print the file name 
                     match file_name.key.clone() {
                         b => {
-                            let mut paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it                            
+                            let paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it                            
                             output_list.push(paths[1].to_string());
                             if listing == true {
                                 println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
@@ -511,9 +512,8 @@ fn aws_file_deleter(user: String, region_input: String, bucket_name: String, fil
     let credentials = load_aws_credentials();
 
     let region = region_input.parse().unwrap();
-    let BUCKET = &bucket_name;
 
-    let bucket = Bucket::new(BUCKET, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials);
 
     let out = bucket.delete(&user_sha_string);
 
@@ -535,13 +535,12 @@ fn aws_file_getter(file_name: String, username: String, file_region: String, buc
     let credentials = load_aws_credentials();
 
     let region = file_region.parse().unwrap();
-    let BUCKET = &bucket_name;
 
-    let mut bucket = Bucket::new(BUCKET, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials);
 
     let user_sha = sha::sha512(username.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
-    let mut user_sha_string = vec_to_hex_string(user_sha_vec);
+    let user_sha_string = vec_to_hex_string(user_sha_vec);
     
     let (file, code) = bucket.get(&(user_sha_string+"/"+&file_name)).unwrap();
 
@@ -608,8 +607,8 @@ fn get_file(action: String, all: bool, pconfig: Config) {
 
             let mut file_to_get_index_str = String::new();
             print!("Please select a file (number) you wish to get: ");
-            stdout().flush();
-            stdin().read_line(&mut file_to_get_index_str);
+            stdout().flush().expect("Cloud not flush stdout buffer");
+            stdin().read_line(&mut file_to_get_index_str).expect("Could not get user input");
              file_to_get_index_str.trim();
              file_to_get_index_str.pop();
 
