@@ -7,13 +7,12 @@ extern crate rand;
 extern crate s3;
 
 use openssl::*;
-use std::fs::{File, create_dir, Permissions, remove_file};
+use std::fs::{File, create_dir, remove_file};
 use std::os::unix::fs::PermissionsExt;
 use std::io::{Write, stdin, stdout};
 use std::io::prelude::*;
-use toml::*;
+use toml::{to_string, from_str};
 use std::env::{home_dir, args, var};
-use std::path::{PathBuf, Path};
 use std::str;
 use std::process::exit;
 use rand::Rng;
@@ -44,10 +43,9 @@ fn check_for_config() -> (bool, bool) {
     let postio_dir = home_dir.to_owned().join(".postio");
     let postio_config_file = postio_dir.to_owned().join("config");
    
-    let mut rtn_tuple = (false, false); 
+    let rtn_tuple: (bool, bool);
 
     if postio_dir.is_dir() {
-        rtn_tuple = (true, false);
         if postio_config_file.is_file() {
             rtn_tuple = (true, true);
         }
@@ -71,22 +69,22 @@ fn create_config() {
     let mut public_key_path = String::new();
 
     print!("Do you have 4096-bit RSA pub/private keys in PEM format? [Y/N]: ");
-    stdout().flush();
+    stdout().flush().expect("Unable to flush stdout");
     let mut key_maybe = String::new();
-    stdin().read_line(&mut key_maybe);
+    stdin().read_line(&mut key_maybe).expect("Something went wrong capturing user input");;
     key_maybe.trim().to_uppercase();
     key_maybe.pop();
 
     if key_maybe == "Y" {
         print!("Full path to your public key: ");
-        stdout().flush();
-        stdin().read_line(&mut public_key_path);
+        stdout().flush().expect("Unable to flush stdout");
+        stdin().read_line(&mut public_key_path).expect("Something went wrong capturing user input");;
         public_key_path.trim();
         public_key_path.pop();
 
         print!("Full path to your private key: ");
-        stdout().flush();
-        stdin().read_line(&mut private_key_path);
+        stdout().flush().expect("Unable to flush stdout");
+        stdin().read_line(&mut private_key_path).expect("Something went wrong capturing user input");;
         private_key_path.trim();
         private_key_path.pop();
 
@@ -99,11 +97,14 @@ fn create_config() {
        
         let private_key_dir = postio_dir.to_owned().join("private_key.pem");
         let mut sender_priv = File::create(private_key_dir).unwrap();
-            sender_priv.write_all(&privy);
+            sender_priv.write_all(&privy).expect("Unable to write private key");
+                let sender_priv_meta = sender_priv.metadata().expect("Unable to get metadata on file");
+                    let mut sender_priv_perms = sender_priv_meta.permissions();
+                        sender_priv_perms.set_mode(700);
 
         let pubby = &keys.public_key_to_pem().unwrap();
         let mut sender_pub = File::create(postio_dir.to_owned().join("public_key.pem").as_path()).unwrap();
-            sender_pub.write_all(&pubby);
+            sender_pub.write_all(&pubby).expect("Unable to create public key");
 
         private_key_path =  home_dir.to_owned().join(".postio/private_key.pem").as_path().to_str().unwrap().to_owned();
         public_key_path = home_dir.to_owned().join(".postio/public_key.pem").as_path().to_str().unwrap().to_owned();
@@ -116,8 +117,8 @@ fn create_config() {
 
     let mut user_email = String::new();
     print!("Please enter the email address you wish to use: ");
-    stdout().flush();  
-    stdin().read_line(&mut user_email).expect("Please enter a valid email address");
+    stdout().flush().expect("Unable to flush stdout");  
+    stdin().read_line(&mut user_email).expect("Something went wrong capturing user input");
     user_email.trim();
     user_email.pop();
 
@@ -126,21 +127,21 @@ fn create_config() {
     let mut postio_file_store_region = String::new();
 
     print!("Do you have an AWS S3 store setup for files? [Y/N]: ");
-    stdout().flush();
-    stdin().read_line(&mut postio_file_store_answer);
+    stdout().flush().expect("Unable to flush stdout");
+    stdin().read_line(&mut postio_file_store_answer).expect("Something went wrong capturing user input");
     postio_file_store_answer.trim();
     postio_file_store_answer.pop();
 
     if postio_file_store_answer.to_uppercase() == "Y".to_string() {
         print!("Amazon S3 store name: ");
-        stdout().flush();
-        stdin().read_line(&mut postio_file_store);
+        stdout().flush().expect("Unable to flush stdout");
+        stdin().read_line(&mut postio_file_store).expect("Something went wrong capturing user input");
         postio_file_store.trim();
         postio_file_store.pop();
 
         print!("S3 store region: ");
-        stdout().flush();
-        stdin().read_line(&mut postio_file_store_region);
+        stdout().flush().expect("Unable to flush stdout");
+        stdin().read_line(&mut postio_file_store_region).expect("Something went wrong capturing user input");
         postio_file_store_region.trim();
         postio_file_store_region.pop();
     }
@@ -160,21 +161,21 @@ fn create_config() {
     let mut postio_key_store_region = String::new();
 
     print!("Do you have an AWS S3 store setup for public keys? [Y/N]: ");
-    stdout().flush();
-    stdin().read_line(&mut postio_key_store_answer);
+    stdout().flush().expect("Unable to flush stdout");
+    stdin().read_line(&mut postio_key_store_answer).expect("Failed reading user input");
     postio_key_store_answer.trim();
     postio_key_store_answer.pop();
 
     if postio_key_store_answer.to_uppercase() == "Y".to_string() {
         print!("Amazon S3 public key store name: ");
-        stdout().flush();
-        stdin().read_line(&mut postio_key_store);
+        stdout().flush().expect("Unable to flush stdout");
+        stdin().read_line(&mut postio_key_store).expect("Failed reading user input");
         postio_key_store.trim();
         postio_key_store.pop();
 
         print!("S3 store region: ");
-        stdout().flush();
-        stdin().read_line(&mut postio_key_store_region);
+        stdout().flush().expect("Unable to flush stdout");
+        stdin().read_line(&mut postio_key_store_region).expect("Failed reading user input");
         postio_key_store.trim();
         postio_key_store.pop();
     }
@@ -202,17 +203,17 @@ fn create_config() {
     //opening public key
     let mut pub_key = Vec::new();
     let mut pub_key_file = File::open(postio_config_content.public_key.to_owned()).unwrap();
-        pub_key_file.read_to_end(&mut pub_key);
+        pub_key_file.read_to_end(&mut pub_key).expect("Unable to read public key");
     
     //sending public key
     create_file_on_aws(user_name.to_owned(), "public_key".to_string(), pub_key, pub_key_reg.to_owned(), pub_key_bucket.to_owned());
 
     //serializing config file
-    let postio = toml::to_string(&postio_config_content).unwrap();
+    let postio = to_string(&postio_config_content).unwrap();
 
     //writing config file to ~/.postio
     let mut postio_config_file = File::create(postio_config_file_path).unwrap();
-        postio_config_file.write_all(&postio.as_bytes());
+        postio_config_file.write_all(&postio.as_bytes()).expect("Cannot write postio config file");
 }
 
 fn create_postio_dir() {
@@ -220,7 +221,7 @@ fn create_postio_dir() {
     let home_dir = home_dir().unwrap();
     let postio_dir = home_dir.to_owned().join(".postio");
 
-    create_dir(postio_dir.to_owned());
+    create_dir(postio_dir.to_owned()).expect("Unable to create ~/.postio");
 }
 
 fn read_config() -> Config {
@@ -234,15 +235,15 @@ fn read_config() -> Config {
     let mut config_file = String::new();
         config_file_holder.read_to_string(&mut config_file).unwrap();
 
-    let postio_config = toml::from_str(&config_file);
+    let postio_config = from_str(&config_file);
 
     //getting config file 
     match postio_config {
         Err(e) => {
             let mut delete_answer = String::new();
             print!("Error in your config file, please check your settings!\n\tWould you like to delete the config file? [Y/N]: ");
-            stdout().flush();
-            stdin().read_line(&mut delete_answer);
+            stdout().flush().expect("Unable to flush output, that's bad");
+            stdin().read_line(&mut delete_answer).expect("User input failed..Sorry");
             delete_answer.trim();
             delete_answer.pop();
 
@@ -281,7 +282,7 @@ fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlo
     //opening file to encrypt
     let mut unencrypted_file = File::open(file_path).unwrap();
     let mut file_buffer = Vec::new();
-        unencrypted_file.read_to_end(&mut file_buffer);
+        unencrypted_file.read_to_end(&mut file_buffer).expect("Unable to read file");
 
     let encrypted_file = openssl::symm::encrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &file_buffer);
     
@@ -289,17 +290,17 @@ fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlo
     let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
 
     //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
-    let fileBlobForAWS: FileBlob = FileBlob{file: encrypted_file.unwrap(), key: encrypted_key, iv: encrypted_iv};
+    let file_blob_for_aws: FileBlob = FileBlob{file: encrypted_file.unwrap(), key: encrypted_key, iv: encrypted_iv};
 
     //return blob
-    fileBlobForAWS
+    file_blob_for_aws
 }
 
-fn aes_decrypter(out_file_path: String, fileFromAWS: FileBlob, postio_config: Config) {
+fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
-    let encrypted = fileFromAWS.file;
-    let encrypted_key = fileFromAWS.key;
-    let encrypted_iv = fileFromAWS.iv;
+    let encrypted = file_from_aws.file;
+    let encrypted_key = file_from_aws.key;
+    let encrypted_iv = file_from_aws.iv;
 
     //decrypting IV,Key with private certificates
     let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
@@ -323,15 +324,15 @@ fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, unen
     //opening your private key
     let mut pv_key = File::open(pconfig.private_key).unwrap();
     let mut private_key: Vec<u8> = Vec::new();
-        pv_key.read_to_end(&mut private_key);
+        pv_key.read_to_end(&mut private_key).expect("Unable to read Private key (for encryption)");
 
     //enabling keys with openssl for RSA decryption
-    let mut keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-    keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
+    let mut _keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
+    _keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
 
     //encrypting IV,Keys
-    let iv_out = keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, openssl::rsa::PKCS1_OAEP_PADDING);
-    let key_out = keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _iv_out = _keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _key_out = _keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, openssl::rsa::PKCS1_OAEP_PADDING);
 
     (enc_buffer_iv.to_vec(), enc_buffer_key.to_vec())
 }
@@ -349,24 +350,13 @@ fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_decryp
     let mut decrypted_key = [0u8;512]; //32
 
     //decrypting and truncated buffer to original lengths
-    let file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, openssl::rsa::PKCS1_OAEP_PADDING);
         let decrypted_iv_trunct: Vec<u8> = decrypted_iv[0..16].to_vec();
 
-    let file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, openssl::rsa::PKCS1_OAEP_PADDING);
         let decrypted_key_trunct: Vec<u8> = decrypted_key[0..32].to_vec();
 
     (decrypted_iv_trunct, decrypted_key_trunct)
-}
-
-
-fn open_file(file_path: String) -> Vec<u8> {
-    //safe file opener
-    let mut out_file: Vec<u8> = Vec::new();
-    let mut file = File::open(file_path).expect("Problems with the file path you gave");
-
-    file.read_to_end(&mut out_file).expect("Cannot read file");
-
-    out_file
 }
 
 fn load_aws_credentials() -> Credentials {
@@ -419,8 +409,8 @@ fn add_users_folder(user: String, region_input: String, bucket_name: String) {
     let response = bucket.list(&user_sha_string, Some(""));
     
     match response {
-        Ok(x) => println!("\nUser directory found!\n"),
-        Err(e) => {let (_, code) = bucket.put(&user_sha_string, &blank.as_bytes(), "text/plain").unwrap();},
+        Ok(_x) => println!("\nUser directory found!\n"),
+        Err(_e) => {let (_, _code) = bucket.put(&user_sha_string, &blank.as_bytes(), "text/plain").unwrap();},
     }
 }
 
@@ -442,7 +432,7 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
         Ok(x) => (x),
         Err(e) => {
             add_users_folder(user.to_owned(), region_input.to_owned(), bucket_name.to_owned());
-            println!("Your username wasn't found on the S3, so I added it for you :), now have a friend send you a file\n");
+            println!("Your username wasn't found on the S3, so I added it for you :), now have a friend send you a file\n\tError: {}", e);
             exit(2);
         }
     };
@@ -472,15 +462,10 @@ fn list_files_in_folder(user: String, region_input: String, bucket_name: String,
             }
             else {
                 for (file_count, file_name) in list.contents.iter().enumerate() { //for each file print the file name 
-                    match file_name.key.clone() {
-                        b => {
-                            let paths: Vec<&str> = b.split("/").collect(); //file name has folder name on top of it                            
-                            output_list.push(paths[1].to_string());
-                            if listing == true {
-                                println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
-                            }
-                        },
-                        _ => println!("Error no file exists here!") //should not get an error if there's a file that exists possibly a string error
+                    let paths: Vec<&str> = file_name.key.split("/").collect(); //file name has folder name on top of it                            
+                    output_list.push(paths[1].to_string());
+                    if listing == true {
+                        println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
                     }
                 }
             }
@@ -566,7 +551,7 @@ fn send_file(sending_file_path: String, to_user: String, pconfig: Config) {
     let out_blob: FileBlob = aes_encrypter(sending_file_path.to_owned(), pconfig.to_owned(), to_user.to_owned());
 
     //serializing to sent to AWS (need Vec<u8>) 
-    let file_to_aws = toml::to_string(&out_blob).unwrap();
+    let file_to_aws = to_string(&out_blob).unwrap();
 
     let file_name_list: Vec<&str> = sending_file_path.split("/").collect();
     let file_name_st = file_name_list[file_name_list.len()-1].to_string();
@@ -591,7 +576,7 @@ fn get_file(action: String, all: bool, pconfig: Config) {
                 aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), i.to_owned()); //create an option to keep this
                 
                 //deserializing
-                let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
+                let out: FileBlob = from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
                 
                 //decrypting
                 aes_decrypter(i.to_owned(), out, pconfig.to_owned());                 
@@ -628,7 +613,7 @@ fn get_file(action: String, all: bool, pconfig: Config) {
                 aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), file_list[file_to_get_index].to_owned()); //create an option to keep this
                 
                 //deserializing
-                let out: FileBlob = toml::from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
+                let out: FileBlob = from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
                 
                 //decrypting
                 aes_decrypter(file_list[file_to_get_index].to_owned(), out, pconfig.to_owned()); 
@@ -638,7 +623,7 @@ fn get_file(action: String, all: bool, pconfig: Config) {
     }
 
     else if action.to_lowercase() == "list".to_string() {
-        let file_list: Vec<String> = list_files_in_folder(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), true);
+        let _file_list: Vec<String> = list_files_in_folder(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), true);
 
         //jump into get if user would like
     }
@@ -660,8 +645,8 @@ fn arg_parser(pconfig: Config) {
 
             let (file_index, user_index) = match (file_index_test, user_index_test) {
                 (Some(x), Some(y)) => (x+1, y+1),
-                (Some(x), None) => {println!("<<Missing user to send file to>>"); help(); exit(1);},
-                (None, Some(y)) => {println!("<<Missing file to send>>"); help(); exit(1);},
+                (Some(_x), None) => {println!("<<Missing user to send file to>>"); help(); exit(1);},
+                (None, Some(_y)) => {println!("<<Missing file to send>>"); help(); exit(1);},
                 (_, _) => {println!("<<Improperly formatted argument>>"); help(); exit(1);},
             };
 
@@ -685,9 +670,9 @@ fn arg_parser(pconfig: Config) {
             let expect_subaction_index = arg_list.iter().position(|r| r == "--all");
 
             let action_index = match (action_index_test, expect_subaction_index) {
-                (Some(x), Some(y)) => x+1,
-                (Some(x), None) => {println!("<<Expected --all as the argument that follows -o [get|list]"); help(); exit(1);},
-                (None, Some(y)) => {println!("<<Expect -o [get|list]>>"); help(); exit(1);},
+                (Some(x), Some(_y)) => x+1,
+                (Some(_x), None) => {println!("<<Expected --all as the argument that follows -o [get|list]"); help(); exit(1);},
+                (None, Some(_y)) => {println!("<<Expect -o [get|list]>>"); help(); exit(1);},
                 (None, None) => {println!("<<Improperly formatted argument>>"); help(); exit(1);},
             };
 
