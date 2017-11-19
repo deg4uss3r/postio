@@ -23,23 +23,32 @@ By the way, you can grab the pre-compiled binaries here:
 
 More binaries are coming once I can set up a proper test suite for the different OSs. :)
 
-## Command line options
- -i file -u user@email.com
- 
-    Uploads file for `-u` user
-    
- -o get
- 
-    Enters get mode which will list files to download, user will then select the file they wish to receive
-    
- -o list
- 
-    Just lists the files in your receive queue
-    
- Optional: --all
- 
-    For use with `-o get` then proceeds to grab all files in queue
-    
+## Options
+```
+Postio 0.2.0
+Ricky (Degausser) <Ricky@Hosfelt.io>
+Send and receive encrypted files
+
+USAGE:
+    postio [FLAGS] [OPTIONS] <-s|-g|-l>
+
+FLAGS:
+        --all          Get all files at once
+    -g                 Gets file from queue
+    -l                 List files in your queue
+        --no-delete    Do not delete files after getting them
+    -s                 Send file to user
+        --setup        Create config file and populate settings
+    -h, --help         Prints help information
+    -V, --version      Prints version information
+
+OPTIONS:
+    -c, --config <config_file>    Sets a custom config file (defaults to ~/.postio/config)
+    -i <Input>                    Sets the input file to use
+    -o <output_directory>         Change output directory to something other than the current directory
+    -u <User>                     User to receive file
+```
+
 ## Config File Structure
 Using [serde](https://crates.io/crates/serde) postio will parse the config file in toml format. 
 
@@ -71,7 +80,6 @@ IRC: degausser (freenode and Mozilla)
 
 Software will remain free but be a good sport and buy me a beer/coffee BTC: `1HJL1PMXi7rgALSo5cPLnRxhdPLBQDjQhd`
 
-## TODO!
 No particular order:
 
 - Give user a `--no-delete` option to keep files on the AWS S3
@@ -81,6 +89,10 @@ No particular order:
 - Bump code to be less messy after testing 
 - Get user feedback :)
 
+## TODO
+- Use `failure` crate for failures
+  - Update all panics to fail nicer
+ 
 ## Licensing and Warnings
 I take no responsibly for getting your files stolen/deleted/hacked/cracked/etc. Also _please_ make sure you set up your AWS instance correctly or someone can run up the charges on your instance! Be smart, be secure!
 
