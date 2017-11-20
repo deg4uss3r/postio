@@ -153,8 +153,8 @@ pub fn create_config() {
         print!("S3 store region: ");
         stdout().flush().expect("Unable to flush stdout");
         stdin().read_line(&mut postio_key_store_region).expect("Failed reading user input");
-        postio_key_store.trim();
-        postio_key_store.pop();
+        postio_key_store_region.trim();
+        postio_key_store_region.pop();
     }
 
     else if postio_key_store_answer.to_uppercase() == "N".to_string() {
