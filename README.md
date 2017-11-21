@@ -25,28 +25,31 @@ More binaries are coming once I can set up a proper test suite for the different
 
 ## Options
 ```
+
 Postio 0.2.0
 Ricky (Degausser) <Ricky@Hosfelt.io>
 Send and receive encrypted files
 
 USAGE:
-    postio [FLAGS] [OPTIONS] <-s|-g|-l>
+    postio [FLAGS] [OPTIONS] <-l|-g|-s>
 
 FLAGS:
-        --all          Get all files at once
-    -g                 Gets file from queue
-    -l                 List files in your queue
-        --no-delete    Do not delete files after getting them
-    -s                 Send file to user
         --setup        Create config file and populate settings
+    -l                 List files in your queue
+    -g                 Gets file from queue
+        --no-delete    Do not delete files after getting them
+        --all          Get all files at once
+    -s                 Send file to user
     -h, --help         Prints help information
     -V, --version      Prints version information
 
 OPTIONS:
-    -c, --config <config_file>    Sets a custom config file (defaults to ~/.postio/config)
-    -i <Input>                    Sets the input file to use
-    -o <output_directory>         Change output directory to something other than the current directory
-    -u <User>                     User to receive file
+    -c, --config </path/to/config>        Sets a custom config file (defaults to ~/.postio/config)
+    -i </path/to/input/file>              Sets the input file to use
+    -o </path/to/output/directory>        Change output directory to something other than the current directory
+    -u <User@email.com>                   User to receive file
+
+
 ```
 
 ## Config File Structure
@@ -82,16 +85,12 @@ Software will remain free but be a good sport and buy me a beer/coffee BTC: `1HJ
 
 No particular order:
 
-- Give user a `--no-delete` option to keep files on the AWS S3
-- Give user a `--config-location` option to allow for multiple/different config file locations (default ~/.postio/config)
-- Give users a break with less interaction
 - Ability to just remove a file
-- Bump code to be less messy after testing 
 - Get user feedback :)
 
 ## TODO
-- Use `failure` crate for failures
-  - Update all panics to fail nicer
+- Custom Errors
+  - Especially over the AWS S3 errors
  
 ## Licensing and Warnings
 I take no responsibly for getting your files stolen/deleted/hacked/cracked/etc. Also _please_ make sure you set up your AWS instance correctly or someone can run up the charges on your instance! Be smart, be secure!

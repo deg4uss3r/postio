@@ -3,7 +3,6 @@ extern crate openssl;
 extern crate rand;
 extern crate s3;
 extern crate serde;
-//#[macro_use] extern crate serde_derive;
 extern crate toml;
 
 use openssl::*;
@@ -19,6 +18,7 @@ use rand::Rng;
 use s3::credentials::Credentials;
 use s3::bucket::Bucket;
 
+//Struct to deserialze the config file into 
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct Config {
     pub email: String,
@@ -30,6 +30,7 @@ pub struct Config {
     pub public_key_store_region: String,
 }
 
+//struct that is stored on the AWS instance
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct FileBlob {
     pub file: Vec<u8>,
@@ -37,14 +38,17 @@ pub struct FileBlob {
     pub iv: Vec<u8>,
 }
 
+//function creates a config file for the user via stdin
 pub fn create_config() {
-    let home_dir = home_dir().unwrap();
+    //safely getting default location for the config
+    let home_dir = home_dir().unwrap(); 
     let postio_dir = home_dir.to_owned().join(".postio");
     let postio_config_file_path = postio_dir.to_owned().join("config");
 
     let mut private_key_path = String::new();
     let mut public_key_path = String::new();
 
+    //get RSA keys or create them
     print!("Do you have 4096-bit RSA pub/private keys in PEM format? [Y/N]: ");
     stdout().flush().expect("Unable to flush stdout");
     let mut key_maybe = String::new();
@@ -67,7 +71,7 @@ pub fn create_config() {
 
     }
 
-    else if key_maybe == "N" {
+    else if key_maybe == "N" { //generate keys for them if they say no
 
         let keys = openssl::rsa::Rsa::generate(4096).unwrap();
         let privy = &keys.private_key_to_pem().unwrap();
@@ -99,6 +103,7 @@ pub fn create_config() {
     user_email.trim();
     user_email.pop();
 
+    //getting S3 file store information
     let mut postio_file_store_answer = String::new();
     let mut postio_file_store = String::new();
     let mut postio_file_store_region = String::new();
@@ -133,6 +138,7 @@ pub fn create_config() {
         exit(1);
     }
 
+    //getting S3 key storage information
     let mut postio_key_store_answer = String::new();
     let mut postio_key_store = String::new();
     let mut postio_key_store_region = String::new();
@@ -167,9 +173,16 @@ pub fn create_config() {
         exit(1);
     }
 
-    let postio_config_content: Config = Config{email:user_email, private_key: private_key_path, public_key: public_key_path, file_store: postio_file_store, file_store_region: postio_file_store_region, public_key_store: postio_key_store, public_key_store_region: postio_key_store_region};
+    //Using gathered information from the user to crate the struct
+    let postio_config_content: Config = Config {
+            email:user_email, private_key: private_key_path, 
+            public_key: public_key_path, file_store: postio_file_store, 
+            file_store_region: postio_file_store_region, 
+            public_key_store: postio_key_store, 
+            public_key_store_region: postio_key_store_region
+        };
 
-    //using new config to send public key to keystore
+    //using new config to send public key to keystore for future use
     let user_name = &postio_config_content.email;
     let pub_key_reg = &postio_config_content.public_key_store_region;
     let pub_key_bucket = &postio_config_content.public_key_store;
@@ -193,6 +206,7 @@ pub fn create_config() {
         postio_config_file.write_all(&postio.as_bytes()).expect("Cannot write postio config file");
 }
 
+//Reads and returns the config from file to struct
 pub fn read_config(config_file_path: &String) -> Config {
     //opening and deserializing config
     let mut config_file_holder = match File::open(&config_file_path) {
@@ -232,6 +246,7 @@ pub fn read_config(config_file_path: &String) -> Config {
     }
 }
 
+//AES Encryption (for the file)
 pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
     let mut key = Vec::new();
@@ -263,6 +278,7 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     file_blob_for_aws
 }
 
+//AES Decryption (for the file file)
 pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
@@ -280,6 +296,7 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
         decrypted_file_path.write_all(&unencrypted.unwrap()).expect("unable to write encrypted file");
 }
 
+//RSA Encryption for sending IV,Key for AES encryption
 pub fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, unencrypted_key: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
     //setting output buffer to write encrypted files to
     let mut enc_buffer_iv = [0u8;512];  //16 bytes
@@ -304,6 +321,7 @@ pub fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, 
     (enc_buffer_iv.to_vec(), enc_buffer_key.to_vec())
 }
 
+//RSA decryption to receive IV,Key and decrypt the file
 pub fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_decrypt: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
     //opening your private key to decrypt IV,Key
     let mut private_key_file = File::open(private_key_path).unwrap();
@@ -326,15 +344,20 @@ pub fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_de
     (decrypted_iv_trunct, decrypted_key_trunct)
 }
 
+//Loads environmental variables for access to the S3 instances
 pub fn load_aws_credentials() -> Credentials {
     //loads aws creds from Bash enviromental variables
-    let aws_access = var("AWS_ACCESS_KEY_ID").expect("Must specify AWS_ACCESS_KEY_ID");
-    let aws_secret = var("AWS_SECRET_ACCESS_KEY").expect("Must specify AWS_SECRET_ACCESS_KEY");
+    let aws_access = var("AWS_ACCESS_KEY_ID").expect("Must specify $AWS_ACCESS_KEY_ID in your environment");
+    let aws_secret = var("AWS_SECRET_ACCESS_KEY").expect("Must specify $AWS_SECRET_ACCESS_KEY in your environment");
 
     //returns credtials type for rust-s3
     Credentials::new(&aws_access, &aws_secret, None)
+
+    //TODO allow for empty credintals? 
+    //TODO research Amazon's new traffic throttles to see if there's a free way to provide a playground
 }
 
+//Sends file to AWS 
 pub fn create_file_on_aws(user: &String, file_name: &String, file: Vec<u8>, region_input: &String, bucket_name: &String) {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
@@ -358,6 +381,8 @@ pub fn create_file_on_aws(user: &String, file_name: &String, file: Vec<u8>, regi
     }
 }
 
+//Adds the users folder if it doesn't exist 
+//SHA512 to hide emails
 pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &String) {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -381,6 +406,7 @@ pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &Stri
     }
 }
 
+//List files in queue
 pub fn list_files_in_folder(user: &String, region_input: &String, bucket_name: &String, listing: bool) -> Vec<String> {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -442,6 +468,7 @@ pub fn list_files_in_folder(user: &String, region_input: &String, bucket_name: &
     output_list
 }
 
+//Stringify Hex to hide users email
 pub fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
     //formats a vector of u8s to padded hex string for storing username
     let mut out_string = String::new();
@@ -453,6 +480,7 @@ pub fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
     out_string
 }
 
+//Deletes specified file on AWS
 pub fn aws_file_deleter(user: String, region_input: String, bucket_name: String, file_name: &String) {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
@@ -483,6 +511,7 @@ pub fn aws_file_deleter(user: String, region_input: String, bucket_name: String,
     }
 }
 
+//Receives a file from the AWS
 pub fn aws_file_getter(file_name: &String, username: String, file_region: String, bucket_name: String) -> Vec<u8> {
     let credentials = load_aws_credentials();
 
@@ -506,6 +535,7 @@ pub fn aws_file_getter(file_name: &String, username: String, file_region: String
     }
 }
 
+//Gets receives public key, Encrypts, and sends file
 pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config) {
     println!("Sending files:\n");
 
@@ -523,6 +553,7 @@ pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config)
     create_file_on_aws(to_user, &file_name_st, file_to_aws.as_bytes().to_vec(), &pconfig.file_store_region, &pconfig.file_store);
 }
 
+//Gets file from AWS and decrypts
 pub fn get_file(file_name: &String, output_directory: &String, all: bool, pconfig: &Config, delete_file: bool) {
     println!("Getting files:\n");
 
