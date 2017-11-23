@@ -6,17 +6,19 @@ extern crate serde;
 extern crate toml;
 
 use openssl::*;
-use std::fs::{File, remove_file};
+use std::fs::{File, remove_file, create_dir_all};
 use std::os::unix::fs::PermissionsExt;
-use std::io::{Write, stdin, stdout};
+use std::io::{Write, stdin, stdout, ErrorKind};
 use std::io::prelude::*;
 use toml::{to_string, from_str};
 use std::env::{home_dir, var};
 use std::str;
+use std::path::Path;
 use std::process::exit;
 use rand::Rng;
 use s3::credentials::Credentials;
 use s3::bucket::Bucket;
+
 
 //Struct to deserialze the config file into 
 #[derive(Serialize,Deserialize,Debug,Clone)]
@@ -38,12 +40,61 @@ pub struct FileBlob {
     pub iv: Vec<u8>,
 }
 
+//checks path for existance of config file
+pub fn check_for_config(user_defined_path: &String) -> bool {
+    let user_path = Path::new(&user_defined_path);
+
+    if user_path.is_dir() {
+        return false;
+    }
+    else {
+        if user_path.exists() {
+            let mut config_file_holder = match File::open(&user_path) {
+                Ok(x) => x,
+                Err(_) => {return false;},
+            };
+
+            let mut config_file = String::new();
+            config_file_holder.read_to_string(&mut config_file).unwrap();
+
+            let postio_config: Result<Config, _> = from_str(&config_file);
+            match postio_config {
+                Ok(_) => {return true;},
+                Err(_) => {return false;},
+            }; 
+        }
+        else {
+            return false;
+        }
+    }
+}
+
 //function creates a config file for the user via stdin
-pub fn create_config() {
+pub fn create_config(user_defined_path: String) {
+//TODO update logic, propogate postio_dir and so through function
+
     //safely getting default location for the config
     let home_dir = home_dir().unwrap(); 
-    let postio_dir = home_dir.to_owned().join(".postio");
-    let postio_config_file_path = postio_dir.to_owned().join("config");
+    let mut postio_dir = home_dir.join(".postio");
+    let postio_config_file_path;
+
+    if user_defined_path == "" {
+        postio_dir = home_dir.join(".postio");
+        postio_config_file_path = postio_dir.join("config");
+    }
+    else {
+        let mut user_path =Path::new(&user_defined_path).to_path_buf();
+
+        if user_path.is_dir() {
+            postio_dir = user_path.to_path_buf();
+            user_path = user_path.join("postio_config");
+        }
+        else {
+            user_path = user_path.to_path_buf();
+        }
+
+        postio_config_file_path = user_path;
+    }
 
     let mut private_key_path = String::new();
     let mut public_key_path = String::new();
@@ -52,20 +103,20 @@ pub fn create_config() {
     print!("Do you have 4096-bit RSA pub/private keys in PEM format? [Y/N]: ");
     stdout().flush().expect("Unable to flush stdout");
     let mut key_maybe = String::new();
-    stdin().read_line(&mut key_maybe).expect("Something went wrong capturing user input");;
+    stdin().read_line(&mut key_maybe).expect("Something went wrong capturing user input");
     key_maybe.trim().to_uppercase();
     key_maybe.pop();
 
     if key_maybe == "Y" {
         print!("Full path to your public key: ");
         stdout().flush().expect("Unable to flush stdout");
-        stdin().read_line(&mut public_key_path).expect("Something went wrong capturing user input");;
+        stdin().read_line(&mut public_key_path).expect("Something went wrong capturing user input");
         public_key_path.trim();
         public_key_path.pop();
 
         print!("Full path to your private key: ");
         stdout().flush().expect("Unable to flush stdout");
-        stdin().read_line(&mut private_key_path).expect("Something went wrong capturing user input");;
+        stdin().read_line(&mut private_key_path).expect("Something went wrong capturing user input");
         private_key_path.trim();
         private_key_path.pop();
 
@@ -201,9 +252,24 @@ pub fn create_config() {
     //serializing config file
     let postio = to_string(&postio_config_content).unwrap();
 
-    //writing config file to ~/.postio
-    let mut postio_config_file = File::create(postio_config_file_path).unwrap();
-        postio_config_file.write_all(&postio.as_bytes()).expect("Cannot write postio config file");
+    //writing config file to ~/.postio or user defined directory (create all directories if they do not exist)
+    let postio_config_file = File::create(&postio_config_file_path);
+
+        match postio_config_file {
+            Ok(mut postio_config_file) => postio_config_file.write_all(&postio.as_bytes()).expect("Cannot write postio config file"),
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    create_dir_all(postio_dir).expect("Error could not create the config file directory");
+                   let mut postio_config_file = File::create(&postio_config_file_path).expect("Error couldn't create file/directory path!"); 
+                    postio_config_file.write_all(&postio.as_bytes()).expect("Cannot write postio config file"); 
+                }
+                else {
+                    println!("Error : {} ", e);
+                    exit(1);
+                }
+            }
+        }
+        
 }
 
 //Reads and returns the config from file to struct

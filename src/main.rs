@@ -8,6 +8,8 @@ extern crate toml;
 
 use clap::{Arg, App, ArgGroup};
 use std::env::home_dir;
+use std::io::{stdin, stdout, Write};
+use std::process::exit;
 
 mod postio;
 
@@ -21,7 +23,7 @@ fn main() {
             .long("config")
             .value_name("/path/to/config")
             .takes_value(true)
-            .help("Sets a custom config file (defaults to ~/.postio/config)"))
+            .help("Sets a custom config file (defaults to $HOME/.postio/config)"))
         .arg(Arg::with_name("Output")
             .short("o")
             .value_name("/path/to/output/directory")
@@ -50,7 +52,7 @@ fn main() {
             .help("Create config file and populate settings"))
         .group(ArgGroup::with_name("Action")
             .required(true)
-            .args(&["List", "Get", "Send"]))
+            .args(&["List", "Get", "Send", "Setup"]))
         .arg(Arg::with_name("Send")
             .short("s")
             .display_order(6)
@@ -70,7 +72,24 @@ fn main() {
         .get_matches();
 
 if matches.is_present("Setup") {
-    postio::create_config();
+    let user_defined_path = matches.value_of("Setup").unwrap_or("").to_string();
+
+    let result: bool = postio::check_for_config(&user_defined_path); //check for config, not directory
+
+    if result {
+        println!("Your config file exists at {} do you wish to continue setting a new one? [Y/N]: ", &user_defined_path);
+        stdout().flush().expect("Unable to flush stdout");
+        let mut config_continue = String::new();
+        stdin().read_line(&mut config_continue).expect("Something went wrong capturing user input");
+        config_continue.trim();
+        config_continue.pop();
+
+        if config_continue.to_lowercase() == "n" {
+            exit(1);
+        }
+    }
+
+    postio::create_config(user_defined_path);
 }
 else {    
         let home_directory_path = home_dir().unwrap();
