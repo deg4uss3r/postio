@@ -6,6 +6,7 @@
 ## How to Install
 First you can clone the git repo and build yourself. 
 - Current the code compiles on Mac OSX (10.12.5 Sierra), and CentOS 7.
+  - If you compile yourself make sure you have `openssl`, `openssl-devel`, and `gcc` already installed on your machine
 - You'll need OpenSSL (for the crypto bindings) to compile.
 
 Next, you'll want to add your AWS key ID and secret access key in your environment. You can do this in unix by adding this to your `.bashrc` or `.bash_profile` and running `source ~/.bashrc`or `source ~/.bash_profile` or by adding these to the terminal you currently have open:
@@ -18,8 +19,8 @@ export AWS_SECRET_ACCESS_KEY="your_secret_access_here"
 After that and you have a working binary you are good to go!
 
 By the way, you can grab the pre-compiled binaries here: 
-- [MacOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86_64-MacOS.tar)
-- [CentOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86_64-Linux.tar)
+- [MacOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86-64_MacOS.tar)
+- [CentOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86-64_Linux.tar)
 
 More binaries are coming once I can set up a proper test suite for the different OSs. :)
 
