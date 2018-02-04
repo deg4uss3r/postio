@@ -36,7 +36,7 @@ fn main() {
         .arg(Arg::with_name("Input")
             .short("i")
             .takes_value(true)
-            .value_name("/path/to/input/file")
+            .value_name("/path/to/file")
             .help("Sets the input file to use"))
         .arg(Arg::with_name("All")
             .long("all")
@@ -61,9 +61,9 @@ fn main() {
             .requires("User"))
         .arg(Arg::with_name("Get")
             .short("g")
+            .takes_value(true)
             .display_order(3)
-            .help("Gets file from queue")
-            .requires("Input"))
+            .help("Gets file from queue"))
         .arg(Arg::with_name("List")
             .short("l")
             .display_order(2)
@@ -109,7 +109,7 @@ else {
         }
 
         if matches.is_present("Get") {
-            let file_to_get = matches.value_of("Input").unwrap();
+            let file_to_get = matches.value_of("Get").unwrap();
             let output_directory = matches.value_of("Output").unwrap_or(".");
             let mut delete = true;
             let mut all_files = false;

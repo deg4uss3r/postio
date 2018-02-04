@@ -358,7 +358,7 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
     let unencrypted =  openssl::symm::decrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &encrypted);
 
     //writing file out
-    let mut decrypted_file_path = File::create(out_file_path).unwrap();
+    let mut decrypted_file_path = File::create(Path::new(&out_file_path)).expect("Unable to create output file");
         decrypted_file_path.write_all(&unencrypted.unwrap()).expect("unable to write encrypted file");
 }
 
@@ -633,14 +633,22 @@ pub fn get_file(file_name: &String, output_directory: &String, all: bool, pconfi
                 let file_from_aws = aws_file_getter(i, pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
 
                 //removing file from AWS
-                if delete_file {}
-                aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), i); //create an option to keep this
-                
+                if delete_file {
+                    aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), i); //create an option to keep this
+                }
+
                 //deserializing
                 let out: FileBlob = from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
                 
                 //decrypting
-                let output_file_directory = output_directory.to_string()+"/"+i;
+                let output_file_directory;
+
+                if Path::new(output_directory).is_dir() {
+                    output_file_directory = output_directory.to_string()+"/"+i;
+                }
+                else {
+                    output_file_directory = output_directory.to_string();
+                }
                 aes_decrypter(output_file_directory, out, pconfig.to_owned());                 
             }
         }
@@ -658,7 +666,14 @@ pub fn get_file(file_name: &String, output_directory: &String, all: bool, pconfi
                 let out: FileBlob = from_str(&String::from_utf8(file_from_aws).unwrap()).unwrap();
                 
                 //decrypting
-                let output_file_directory = output_directory.to_string()+"/"+file_name;
+                let output_file_directory;
+
+                if Path::new(output_directory).is_dir() {
+                    output_file_directory = output_directory.to_string()+"/"+file_name;
+                }
+                else {
+                    output_file_directory = output_directory.to_string();
+                }
                 aes_decrypter(output_file_directory, out, pconfig.to_owned()); 
         }
 

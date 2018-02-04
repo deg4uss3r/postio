@@ -25,7 +25,6 @@ More binaries are coming once I can set up a proper test suite for the different
 
 ## Options
 ```
-
 Postio 0.2.0
 Ricky (Degausser) <Ricky@Hosfelt.io>
 Send and receive encrypted files
@@ -48,8 +47,6 @@ OPTIONS:
     -i </path/to/input/file>              Sets the input file to use
     -o </path/to/output/directory>        Change output directory to something other than the current directory
     -u <User@email.com>                   User to receive file
-
-
 ```
 
 ## Config File Structure
