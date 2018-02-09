@@ -1,6 +1,6 @@
 [package]
 name = "postio"
-version = "0.2.0"
+version = "0.2.2"
 authors = ["deg4uss3r <ricky@hosfelt.io>"]
 
 [dependencies]

@@ -418,9 +418,6 @@ pub fn load_aws_credentials() -> Credentials {
 
     //returns credtials type for rust-s3
     Credentials::new(&aws_access, &aws_secret, None)
-
-    //TODO allow for empty credintals? 
-    //TODO research Amazon's new traffic throttles to see if there's a free way to provide a playground
 }
 
 //Sends file to AWS 
@@ -530,7 +527,6 @@ pub fn list_files_in_folder(user: &String, region_input: &String, bucket_name: &
             }
         }
     }
-
     output_list
 }
 
@@ -542,7 +538,6 @@ pub fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
     for i in hex_vec {
         out_string += &format!("{:01$X}", i, 2);
     }
-
     out_string
 }
 
@@ -603,7 +598,7 @@ pub fn aws_file_getter(file_name: &String, username: String, file_region: String
 
 //Gets receives public key, Encrypts, and sends file
 pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config) {
-    println!("Sending files:\n");
+    println!("Sending files\n");
 
     //encrypting and sending a file to the AWS
     //Encrypting
@@ -620,12 +615,11 @@ pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config)
 }
 
 //Gets file from AWS and decrypts
-pub fn get_file(file_name: &String, output_directory: &String, all: bool, pconfig: &Config, delete_file: bool) {
-    println!("Getting files:\n");
+pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, all: bool, pconfig: &Config, delete_file: bool) {
+    let file_list: Vec<String> =  list_files_in_folder(&pconfig.email, &pconfig.file_store_region, &pconfig.file_store, false);
 
         if all == true {
-            let file_list: Vec<String> =  list_files_in_folder(&pconfig.email, &pconfig.file_store_region, &pconfig.file_store, false);
-            
+           println!("Getting all files\n"); 
             for i in file_list.iter() {
                 //testing receiving file and decryption
                 //first get file from AWS store
@@ -652,14 +646,17 @@ pub fn get_file(file_name: &String, output_directory: &String, all: bool, pconfi
                 aes_decrypter(output_file_directory, out, pconfig.to_owned());                 
             }
         }
-
         else {
+                let file_name = match file_name_wrapper {
+                    Some(file_name) => file_name,
+                    None => {let mut file_holder = String::new(); println!("Select index of file: "); stdin().read_line(&mut file_holder).expect("Failed reading user input"); file_holder}
+                };
                 //first get file from AWS store
-                let file_from_aws = aws_file_getter(file_name, pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
+                let file_from_aws = aws_file_getter(&file_name, pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
 
                 //removing file from AWS
                 if delete_file {
-                    aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), file_name); //create an option to keep this
+                    aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), &file_name); //create an option to keep this
                 }
 
                 //deserializing
@@ -669,12 +666,11 @@ pub fn get_file(file_name: &String, output_directory: &String, all: bool, pconfi
                 let output_file_directory;
 
                 if Path::new(output_directory).is_dir() {
-                    output_file_directory = output_directory.to_string()+"/"+file_name;
+                    output_file_directory = output_directory.to_string()+"/"+&file_name;
                 }
                 else {
                     output_file_directory = output_directory.to_string();
                 }
-                aes_decrypter(output_file_directory, out, pconfig.to_owned()); 
+                aes_decrypter(output_file_directory, out, pconfig.to_owned());
         }
-
-}
+    }
