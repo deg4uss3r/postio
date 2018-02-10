@@ -228,7 +228,8 @@ pub fn create_config(user_defined_path: String) {
     //Using gathered information from the user to crate the struct
     let postio_config_content: Config = Config {
             email:user_email, private_key: private_key_path, 
-            public_key: public_key_path, file_store: postio_file_store, 
+            public_key: public_key_path, 
+            file_store: postio_file_store, 
             file_store_region: postio_file_store_region, 
             public_key_store: postio_key_store, 
             public_key_store_region: postio_key_store_region
@@ -238,9 +239,14 @@ pub fn create_config(user_defined_path: String) {
     let user_name = &postio_config_content.email;
     let pub_key_reg = &postio_config_content.public_key_store_region;
     let pub_key_bucket = &postio_config_content.public_key_store;
-    
+    let file_store_reg = &postio_config_content.file_store_region;
+    let file_store = &postio_config_content.file_store;
+
     //adding user to database
+    println!("Adding public keys for {} to {}:{}", user_name, pub_key_reg,pub_key_bucket);
     add_users_folder(user_name, pub_key_reg, pub_key_bucket);
+    println!("Adding file queue for {} to {}:{}", user_name, file_store_reg,file_store);
+    add_users_folder(user_name, file_store_reg, file_store);
     
     //opening public key
     let mut pub_key = Vec::new();
@@ -462,12 +468,12 @@ pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &Stri
 
     let bucket = Bucket::new(&bucket_name, region, credentials);
 
-    let response = bucket.list(&user_sha_string, Some(""));
+// used to use this to verify if the bucket existed
+// possible that amazon changed the resonse and I cannot tell if it existed
+// looks like it doesnt matter if I try to create a folder that doesn't exist though
+//    let response = bucket.list(&user_sha_string, Some(""));
     
-    match response {
-        Ok(_x) => println!("\nUser directory found!\n"),
-        Err(_e) => {let (_, _code) = bucket.put(&user_sha_string, &blank.as_bytes(), "text/plain").unwrap();},
-    }
+    bucket.put(&user_sha_string, &blank.as_bytes(), "text/plain").unwrap();
 }
 
 //List files in queue
