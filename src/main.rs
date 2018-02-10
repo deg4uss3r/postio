@@ -5,6 +5,7 @@ extern crate s3;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate toml;
+extern crate shellexpand;
 
 use clap::{Arg, App, ArgGroup};
 use std::env::home_dir;

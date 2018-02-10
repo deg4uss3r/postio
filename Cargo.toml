@@ -4,10 +4,11 @@ version = "0.2.2"
 authors = ["deg4uss3r <ricky@hosfelt.io>"]
 
 [dependencies]
-openssl = "0.9.15"
-toml = "0.4.5"
-serde_derive = "1.0.11"
-serde = "1.0.11"
-rand = "0.3.17"
-rust-s3 = "0.8.0"
-clap = "2.27.1" 
+openssl = "0.9"
+toml = "0.4"
+serde_derive = "1.0"
+serde = "1.0"
+rand = "0.3"
+rust-s3 = "0.8"
+clap = "2.27"
+shellexpand = "1.0" 

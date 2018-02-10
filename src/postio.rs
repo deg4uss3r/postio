@@ -6,19 +6,19 @@ extern crate serde;
 extern crate toml;
 
 use openssl::*;
+use rand::Rng;
+use s3::bucket::Bucket;
+use s3::credentials::Credentials;
+use shellexpand;
 use std::fs::{File, remove_file, create_dir_all};
 use std::os::unix::fs::PermissionsExt;
 use std::io::{Write, stdin, stdout, ErrorKind};
 use std::io::prelude::*;
-use toml::{to_string, from_str};
 use std::env::{home_dir, var};
 use std::str;
 use std::path::Path;
 use std::process::exit;
-use rand::Rng;
-use s3::credentials::Credentials;
-use s3::bucket::Bucket;
-
+use toml::{to_string, from_str};
 
 //Struct to deserialze the config file into 
 #[derive(Serialize,Deserialize,Debug,Clone)]
@@ -113,13 +113,14 @@ pub fn create_config(user_defined_path: String) {
         stdin().read_line(&mut public_key_path).expect("Something went wrong capturing user input");
         public_key_path.trim();
         public_key_path.pop();
+        public_key_path = (shellexpand::full(&public_key_path).unwrap()).to_string(); 
 
         print!("Full path to your private key: ");
         stdout().flush().expect("Unable to flush stdout");
         stdin().read_line(&mut private_key_path).expect("Something went wrong capturing user input");
         private_key_path.trim();
         private_key_path.pop();
-
+        private_key_path = (shellexpand::full(&private_key_path).unwrap()).to_string(); 
     }
 
     else if key_maybe == "N" { //generate keys for them if they say no
