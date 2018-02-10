@@ -83,7 +83,7 @@ pub fn create_config(user_defined_path: String) {
         postio_config_file_path = postio_dir.join("config");
     }
     else {
-        let mut user_path =Path::new(&user_defined_path).to_path_buf();
+        let mut user_path =Path::new(&(shellexpand::full(&user_defined_path).unwrap()).into_owned()).to_path_buf();
 
         if user_path.is_dir() {
             postio_dir = user_path.to_path_buf();
