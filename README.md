@@ -18,34 +18,28 @@ export AWS_SECRET_ACCESS_KEY="your_secret_access_here"
 
 After that and you have a working binary you are good to go!
 
-By the way, you can grab the pre-compiled binaries here: 
-- [MacOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86-64_MacOS.tar)
-- [CentOS](https://s3-eu-west-1.amazonaws.com/postio-binary/x86-64_Linux.tar)
-
-More binaries are coming once I can set up a proper test suite for the different OSs. :)
+By the way, you can grab the pre-compiled binaries (in the near future) by doing `cargo install postio`: 
 
 ## Options
 ```
-Postio 0.2.0
+Postio 0.3.0
 Ricky (Degausser) <Ricky@Hosfelt.io>
 Send and receive encrypted files
 
 USAGE:
-    postio [FLAGS] [OPTIONS] <-l|-g|-s>
+    Postio [FLAGS] [OPTIONS]
 
 FLAGS:
-        --setup        Create config file and populate settings
-    -l                 List files in your queue
-    -g                 Gets file from queue
-        --no-delete    Do not delete files after getting them
-        --all          Get all files at once
-    -s                 Send file to user
-    -h, --help         Prints help information
-    -V, --version      Prints version information
+    -x, --setup        Create config file and populate settings
+    -l, --list         List files in your queue
+    -d, --no-delete    Do not delete files after getting them
+    -a, --all          Get all files at once
+    -Q, --clear        Deletes all files in your queue
 
 OPTIONS:
-    -c, --config </path/to/config>        Sets a custom config file (defaults to ~/.postio/config)
-    -i </path/to/input/file>              Sets the input file to use
+    -g <number in queue>                  Gets file from queue [default: ]
+    -s </file/to/send>                    Send file to user
+    -c, --config </path/to/config>        Sets a custom config file (defaults to $HOME/.postio/config)
     -o </path/to/output/directory>        Change output directory to something other than the current directory
     -u <User@email.com>                   User to receive file
 ```
@@ -65,7 +59,7 @@ public_key_store = "postio-keys"
 public_key_store_region = "eu-central-1"
 ```
 
-On the first run the program will set up the config file for you, including generating the RSA private/public keys. You can also generate these on your own:
+On the first run the program will set up the config file for you (or you can ran `postio -x` to setup another config file, including generating the RSA private/public keys. You can also generate these on your own:
 
 ```
 openssl genrsa -des3 -out private.pem 4096
@@ -80,15 +74,6 @@ Email: ricky<a>hosfelt.io
 IRC: degausser (freenode and Mozilla)
 
 Software will remain free but be a good sport and buy me a beer/coffee BTC: `1HJL1PMXi7rgALSo5cPLnRxhdPLBQDjQhd`
-
-No particular order:
-
-- Ability to just remove a file
-- Get user feedback :)
-
-## TODO
-- Custom Errors
-  - Especially over the AWS S3 errors
  
 ## Licensing and Warnings
 I take no responsibly for getting your files stolen/deleted/hacked/cracked/etc. Also _please_ make sure you set up your AWS instance correctly or someone can run up the charges on your instance! Be smart, be secure!

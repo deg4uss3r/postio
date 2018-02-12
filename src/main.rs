@@ -113,12 +113,13 @@ else {
            }
         }
 
-        if matches.is_present("Send") {
+        else if matches.is_present("Send") {
             let file_to_send = matches.value_of("Send").unwrap();
             let user_to_send_file = matches.value_of("User").unwrap();
             postio::send_file(&file_to_send.to_string(), &user_to_send_file.to_string(), &user_profile);
         }
-        if matches.occurrences_of("Get") > 0 {
+
+        else if matches.occurrences_of("Get") > 0 {
             let user_file = matches.value_of("Get");
 
             let mut file_to_get = None;
@@ -142,12 +143,14 @@ else {
 
             postio::get_file(file_to_get, &output_directory.to_string(), all_files, &user_profile, delete);
         }
-        if matches.is_present("Clear") {
+        
+        else if matches.is_present("Clear") {
             let file_list = postio::list_files_in_folder(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, false);
             for file in file_list.iter() {
                 postio::aws_file_deleter(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, file);
             }
         }
+
         else {
             let mut help = stdout();
             app.write_help(&mut help).expect("Cannot Get help...I should see a doctor");

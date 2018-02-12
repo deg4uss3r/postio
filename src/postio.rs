@@ -369,7 +369,8 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
     let unencrypted =  openssl::symm::decrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &encrypted);
 
     //writing file out
-    let mut decrypted_file_path = File::create(Path::new(&out_file_holder)).expect("Unable to create output file");
+    let fileout = Path::new(&out_file_holder);
+    let mut decrypted_file_path = File::create(fileout).expect("Unable to write file to disk");
         decrypted_file_path.write_all(&unencrypted.unwrap()).expect("unable to write encrypted file");
 }
 
