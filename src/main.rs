@@ -7,7 +7,7 @@ extern crate serde;
 extern crate toml;
 extern crate shellexpand;
 
-use clap::{Arg, App, ArgGroup};
+use clap::{Arg, App};
 use std::env::home_dir;
 use std::io::{stdin, stdout, Write};
 use std::process::exit;
@@ -15,7 +15,7 @@ use std::process::exit;
 mod postio;
 
 fn main() {
-    let matches = App::new("Postio")
+    let app = App::new("Postio")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Ricky (Degausser) <Ricky@Hosfelt.io>")
         .about("Send and receive encrypted files")
@@ -49,9 +49,6 @@ fn main() {
             .long("setup")
             .display_order(1)
             .help("Create config file and populate settings"))
-        .group(ArgGroup::with_name("Action")
-            .required(true)
-            .args(&["List", "Get", "Send", "Setup"]))
         .arg(Arg::with_name("Send")
             .short("s")
             .takes_value(true)
@@ -63,16 +60,24 @@ fn main() {
             .short("g")
             .value_name("number in queue")
             .takes_value(true)
+            .default_value("")
             .display_order(3)
             .help("Gets file from queue"))
         .arg(Arg::with_name("List")
             .short("l")
+            .long("list")
             .value_name("List")
             .takes_value(false)
             .display_order(2)
             .help("List files in your queue"))
+        .arg(Arg::with_name("Clear")
+            .short("Q")
+            .long("clear")
+            .conflicts_with_all(&["List","Get","Send","Setup","No_delete","All","Output","User"])
+            .help("Deletes all files in your queue")
+            .takes_value(false));
 
-        .get_matches();
+        let matches = app.clone().get_matches();
 
 if matches.is_present("Setup") {
     let user_defined_path = matches.value_of("Setup").unwrap_or("").to_string();
@@ -102,7 +107,10 @@ else {
         let user_profile = postio::read_config(&config_file.to_string());
 
         if matches.is_present("List") {
-           postio::list_files_in_folder(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, true);
+           let file_list = postio::list_files_in_folder(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, true);
+           if file_list.len() == 0 {
+               println!("No files in queue, send a file!");
+           }
         }
 
         if matches.is_present("Send") {
@@ -110,14 +118,17 @@ else {
             let user_to_send_file = matches.value_of("User").unwrap();
             postio::send_file(&file_to_send.to_string(), &user_to_send_file.to_string(), &user_profile);
         }
-
-        if matches.is_present("Get") {
+        if matches.occurrences_of("Get") > 0 {
             let user_file = matches.value_of("Get");
-            let file_to_get = match user_file {
-                Some(file) => Some(file.to_string()),
-                None => None
-            };
+
+            let mut file_to_get = None;
+
+            if user_file != Some("") {
+                file_to_get = Some(user_file.unwrap().to_string());
+            }
+
             let output_directory = matches.value_of("Output").unwrap_or(".");
+            let output_directory = shellexpand::full(output_directory).unwrap();
             let mut delete = true;
             let mut all_files = false;
 
@@ -130,6 +141,17 @@ else {
             }
 
             postio::get_file(file_to_get, &output_directory.to_string(), all_files, &user_profile, delete);
+        }
+        if matches.is_present("Clear") {
+            let file_list = postio::list_files_in_folder(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, false);
+            for file in file_list.iter() {
+                postio::aws_file_deleter(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, file);
+            }
+        }
+        else {
+            let mut help = stdout();
+            app.write_help(&mut help).expect("Cannot Get help...I should see a doctor");
+            print!("\n");
         }
     }
 }

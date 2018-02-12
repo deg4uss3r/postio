@@ -335,7 +335,9 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     }
 
     //opening file to encrypt
-    let mut unencrypted_file = File::open(file_path).unwrap();
+    let path_expansion = shellexpand::full(&file_path).expect("Cannot expand file path").to_string();
+    let full_file_path = Path::new(&path_expansion);
+    let mut unencrypted_file = File::open(full_file_path).unwrap();
     let mut file_buffer = Vec::new();
         unencrypted_file.read_to_end(&mut file_buffer).expect("Unable to read file");
 
@@ -358,6 +360,8 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
     let encrypted_key = file_from_aws.key;
     let encrypted_iv = file_from_aws.iv;
 
+    let out_file_holder = shellexpand::full(&out_file_path).expect("Cannot convert output directory to path!").to_string();
+
     //decrypting IV,Key with private certificates
     let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
 
@@ -365,7 +369,7 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
     let unencrypted =  openssl::symm::decrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &encrypted);
 
     //writing file out
-    let mut decrypted_file_path = File::create(Path::new(&out_file_path)).expect("Unable to create output file");
+    let mut decrypted_file_path = File::create(Path::new(&out_file_holder)).expect("Unable to create output file");
         decrypted_file_path.write_all(&unencrypted.unwrap()).expect("unable to write encrypted file");
 }
 
@@ -376,7 +380,7 @@ pub fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, 
     let mut enc_buffer_key = [0u8;512]; //32 bytes
 
     //getting public key of receiver
-    let public_key = aws_file_getter(&"public_key".to_string(), to_user, pconfig.public_key_store_region, pconfig.public_key_store);
+    let public_key = aws_file_getter(&"public_key".to_string(), &to_user, &pconfig.public_key_store_region, &pconfig.public_key_store);
 
     //opening your private key
     let mut pv_key = File::open(pconfig.private_key).unwrap();
@@ -520,10 +524,7 @@ pub fn list_files_in_folder(user: &String, region_input: &String, bucket_name: &
         }
     
         else {
-            if list.contents.len() == 0 { //after we remove the first if there none, no files
-                println!("No files to get!");
-            }
-            else {
+            if list.contents.len() > 0 {
                 for (file_count, file_name) in list.contents.iter().enumerate() { //for each file print the file name 
                     let paths: Vec<&str> = file_name.key.split("/").collect(); //file name has folder name on top of it                            
                     output_list.push(paths[1].to_string());
@@ -549,7 +550,7 @@ pub fn vec_to_hex_string(hex_vec: Vec<u8>) -> String {
 }
 
 //Deletes specified file on AWS
-pub fn aws_file_deleter(user: String, region_input: String, bucket_name: String, file_name: &String) {
+pub fn aws_file_deleter(user: &String, region_input: &String, bucket_name: &String, file_name: &String) {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -580,7 +581,7 @@ pub fn aws_file_deleter(user: String, region_input: String, bucket_name: String,
 }
 
 //Receives a file from the AWS
-pub fn aws_file_getter(file_name: &String, username: String, file_region: String, bucket_name: String) -> Vec<u8> {
+pub fn aws_file_getter(file_name: &String, username: &String, file_region: &String, bucket_name: &String) -> Vec<u8> {
     let credentials = load_aws_credentials();
 
     let region = file_region.parse().unwrap();
@@ -605,7 +606,7 @@ pub fn aws_file_getter(file_name: &String, username: String, file_region: String
 
 //Gets receives public key, Encrypts, and sends file
 pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config) {
-    println!("Sending files\n");
+    println!("\nSending file: {}", sending_file_path);
 
     //encrypting and sending a file to the AWS
     //Encrypting
@@ -625,17 +626,22 @@ pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config)
 pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, all: bool, pconfig: &Config, delete_file: bool) {
     let file_list: Vec<String> =  list_files_in_folder(&pconfig.email, &pconfig.file_store_region, &pconfig.file_store, false);
 
+        if file_list.len() == 0 {
+            println!("No files to get! Why not send a file?");
+            exit(0);
+        }
+
         if all == true {
            println!("Getting all files\n"); 
             for i in file_list.iter() {
                 //testing receiving file and decryption
                 //first get file from AWS store
             
-                let file_from_aws = aws_file_getter(i, pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
+                let file_from_aws = aws_file_getter(i, &pconfig.email, &pconfig.file_store_region, &pconfig.file_store);
 
                 //removing file from AWS
                 if delete_file {
-                    aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), i); //create an option to keep this
+                    aws_file_deleter(&pconfig.email, &pconfig.file_store_region, &pconfig.file_store, i); //create an option to keep this
                 }
 
                 //deserializing
@@ -654,16 +660,32 @@ pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, al
             }
         }
         else {
+                for (c,f) in file_list.iter().enumerate() {
+                    println!("{}) {}",c,f);
+                }
+
                 let file_name = match file_name_wrapper {
                     Some(file_name) => file_name,
-                    None => {let mut file_holder = String::new(); println!("Select index of file: "); stdin().read_line(&mut file_holder).expect("Failed reading user input"); file_holder}
+                    None => {
+                        let mut file_holder = String::new(); 
+                        print!("Select index of file: ");
+                        stdout().flush().expect("Unable to flush stdout"); 
+                        stdin().read_line(&mut file_holder).expect("Failed reading user input");
+                        file_holder.trim();
+                        file_holder.pop(); 
+                        let file_out = &file_list[file_holder.parse::<usize>().expect("Cannot convert the index, try again")]; 
+                        file_out.to_owned()
+                    }
                 };
+
+                println!("\nGetting file: {}", file_name);
+
                 //first get file from AWS store
-                let file_from_aws = aws_file_getter(&file_name, pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned());
+                let file_from_aws = aws_file_getter(&file_name, &pconfig.email, &pconfig.file_store_region, &pconfig.file_store);
 
                 //removing file from AWS
                 if delete_file {
-                    aws_file_deleter(pconfig.email.to_owned(), pconfig.file_store_region.to_owned(), pconfig.file_store.to_owned(), &file_name); //create an option to keep this
+                    aws_file_deleter(&pconfig.email, &pconfig.file_store_region, &pconfig.file_store, &file_name); //create an option to keep this
                 }
 
                 //deserializing
