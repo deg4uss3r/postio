@@ -12,7 +12,7 @@ use s3::credentials::Credentials;
 use shellexpand;
 use std::fs::{File, remove_file, create_dir_all};
 use std::os::unix::fs::PermissionsExt;
-use std::io::{Write, stdin, stdout, ErrorKind};
+use std::io::{Write, stdin, stdout, Error, ErrorKind};
 use std::io::prelude::*;
 use std::env::{home_dir, var};
 use std::str;
@@ -67,6 +67,19 @@ pub fn check_for_config(user_defined_path: &String) -> bool {
             return false;
         }
     }
+}
+
+pub fn check_config_files_config(postio_config: &Config) -> Result<(), Error> {
+        if !Path::new(&postio_config.private_key).is_file() {
+            let custom_error = Error::new(ErrorKind::NotFound, "Private key not found!");
+            return Err(custom_error);
+        }
+        if !Path::new(&postio_config.public_key).is_file() {
+            let custom_error = Error::new(ErrorKind::NotFound, "Public key not found!");
+            return Err(custom_error);
+        }
+
+    Ok(())
 }
 
 //function creates a config file for the user via stdin
@@ -323,7 +336,10 @@ pub fn read_config(config_file_path: &String) -> Config {
 pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
     let mut key = Vec::new();
-    let mut rng = rand::thread_rng(); 
+    let mut rng = rand::thread_rng();
+
+    //checking keys in postio config 
+    check_config_files_config(&pconfig).expect("Error, something is wrong with your config file"); 
     
     //randomizing IV (16 bytes)
     for _ in 0..16 {
@@ -362,6 +378,8 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
 
     let out_file_holder = shellexpand::full(&out_file_path).expect("Cannot convert output directory to path!").to_string();
 
+    check_config_files_config(&postio_config).expect("Error, something is wrong with your config file");
+
     //decrypting IV,Key with private certificates
     let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
 
@@ -383,8 +401,11 @@ pub fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, 
     //getting public key of receiver
     let public_key = aws_file_getter(&"public_key".to_string(), &to_user, &pconfig.public_key_store_region, &pconfig.public_key_store);
 
+    //checking postio config for key existance
+    check_config_files_config(&pconfig).expect("Error, something is wrong with your config file");
+
     //opening your private key
-    let mut pv_key = File::open(pconfig.private_key).unwrap();
+    let mut pv_key = File::open(pconfig.private_key).expect("Private Key Error in RSA encryption");
     let mut private_key: Vec<u8> = Vec::new();
         pv_key.read_to_end(&mut private_key).expect("Unable to read Private key (for encryption)");
 
@@ -402,7 +423,7 @@ pub fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, 
 //RSA decryption to receive IV,Key and decrypt the file
 pub fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_decrypt: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
     //opening your private key to decrypt IV,Key
-    let mut private_key_file = File::open(private_key_path).unwrap();
+    let mut private_key_file = File::open(private_key_path).expect("Error opening private key");
     let mut private_key: Vec<u8> = Vec::new();
         private_key_file.read_to_end(&mut private_key).expect("Not able to read private key!");
     
