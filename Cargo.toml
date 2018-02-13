@@ -2,6 +2,10 @@
 name = "postio"
 version = "0.3.0"
 authors = ["deg4uss3r <ricky@hosfelt.io>"]
+description = "postio - Encrypted file sender/queue/receiver using an AWS S3 backend"
+homepage = "https://github.com/deg4uss3r/postio"
+repository = "https://github.com/deg4uss3r/postio"
+readme = "README.md" 
 
 [dependencies]
 openssl = "0.9"
@@ -11,4 +15,6 @@ serde = "1.0"
 rand = "0.3"
 rust-s3 = "0.8"
 clap = "2.27"
-shellexpand = "1.0" 
+shellexpand = "1.0"
+
+

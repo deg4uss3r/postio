@@ -1,23 +1,19 @@
-extern crate clap;
 extern crate openssl;
 extern crate rand;
-extern crate s3;
-extern crate serde;
-extern crate toml;
 
 use openssl::*;
 use rand::Rng;
 use s3::bucket::Bucket;
 use s3::credentials::Credentials;
 use shellexpand;
-use std::fs::{File, remove_file, create_dir_all};
-use std::os::unix::fs::PermissionsExt;
+use std::env::{home_dir, var};
+use std::fs::{File, remove_file, create_dir_all, OpenOptions};
 use std::io::{Write, stdin, stdout, Error, ErrorKind};
 use std::io::prelude::*;
-use std::env::{home_dir, var};
-use std::str;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process::exit;
+use std::str;
 use toml::{to_string, from_str};
 
 //Struct to deserialze the config file into 
@@ -71,11 +67,11 @@ pub fn check_for_config(user_defined_path: &String) -> bool {
 
 pub fn check_config_files_config(postio_config: &Config) -> Result<(), Error> {
         if !Path::new(&postio_config.private_key).is_file() {
-            let custom_error = Error::new(ErrorKind::NotFound, "Private key not found!");
+            let custom_error = Error::new(ErrorKind::NotFound, format!("Private key not found at path {} (in config file)", &postio_config.private_key));
             return Err(custom_error);
         }
         if !Path::new(&postio_config.public_key).is_file() {
-            let custom_error = Error::new(ErrorKind::NotFound, "Public key not found!");
+            let custom_error = Error::new(ErrorKind::NotFound, format!("Public key not found at path {} (in config file)", &postio_config.public_key));
             return Err(custom_error);
         }
 
@@ -142,11 +138,9 @@ pub fn create_config(user_defined_path: String) {
         let privy = &keys.private_key_to_pem().unwrap();
        
         let private_key_dir = postio_dir.to_owned().join("private_key.pem");
-        let mut sender_priv = File::create(private_key_dir).unwrap();
+        let mut sender_priv = OpenOptions::new().create(true).write(true).mode(0o600)
+            .open(private_key_dir).expect("Unable to write file to disk");
             sender_priv.write_all(&privy).expect("Unable to write private key");
-                let sender_priv_meta = sender_priv.metadata().expect("Unable to get metadata on file");
-                    let mut sender_priv_perms = sender_priv_meta.permissions();
-                        sender_priv_perms.set_mode(700);
 
         let pubby = &keys.public_key_to_pem().unwrap();
         let mut sender_pub = File::create(postio_dir.to_owned().join("public_key.pem").as_path()).unwrap();
