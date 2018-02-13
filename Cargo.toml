@@ -6,7 +6,7 @@ description = "postio - Encrypted file sender/queue/receiver using an AWS S3 bac
 homepage = "https://github.com/deg4uss3r/postio"
 repository = "https://github.com/deg4uss3r/postio"
 readme = "README.md" 
-
+license-file = "LICENSE.md"
 [dependencies]
 openssl = "0.9"
 toml = "0.4"
@@ -16,5 +16,3 @@ rand = "0.3"
 rust-s3 = "0.8"
 clap = "2.27"
 shellexpand = "1.0"
-
-
