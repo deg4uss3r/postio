@@ -1,18 +1,13 @@
-extern crate clap;
-extern crate openssl;
-extern crate rand;
-extern crate s3;
-extern crate serde;
-#[macro_use] extern crate serde_derive;
-extern crate toml;
-extern crate shellexpand;
 
 use clap::{Arg, App};
-use std::env::home_dir;
+use dirs::home_dir;
+
 use std::io::{stdin, stdout, Write};
 use std::process::exit;
 
 mod postio;
+
+use postio::Encryption;
 
 fn main() {
     let app = App::new("Postio")
@@ -34,6 +29,11 @@ fn main() {
             .takes_value(true)
             .value_name("User@email.com")
             .help("User to receive file"))
+        .arg(Arg::with_name("Encryption")
+            .long("encrypt")
+            .takes_value(true)
+            .default_value("AES")
+            .help("Set the encryption algorithm (default: AES; supported: chacha, AES (256 in CBC mode))"))
         .arg(Arg::with_name("All")
             .short("a")
             .long("all")
@@ -116,7 +116,18 @@ else {
         else if matches.is_present("Send") {
             let file_to_send = matches.value_of("Send").unwrap();
             let user_to_send_file = matches.value_of("User").unwrap();
-            postio::send_file(&file_to_send.to_string(), &user_to_send_file.to_string(), &user_profile);
+            let enc: Encryption;
+
+            if matches.value_of("Encryption").unwrap().to_lowercase() == "aes" {
+                enc = Encryption::AES;
+            } else if matches.value_of("Encryption").unwrap().to_lowercase() == "chacha"{
+                enc = Encryption::Chacha;
+            } else {
+                println!("Error: unsupported encryption algorithm");
+                exit(9);
+            }
+
+            postio::send_file(&file_to_send.to_string(), &user_to_send_file.to_string(), &user_profile, enc);
         }
 
         else if matches.occurrences_of("Get") > 0 {
@@ -141,7 +152,17 @@ else {
                 delete = false;
             }
 
-            postio::get_file(file_to_get, &output_directory.to_string(), all_files, &user_profile, delete);
+            let enc;
+
+            if matches.value_of("Encryption").unwrap().to_lowercase() == "aes" {
+                enc = Encryption::AES;
+            } else if matches.value_of("Encryption").unwrap().to_lowercase() == "chacha"{
+                enc = Encryption::Chacha;
+            } else {
+                println!("Error: unsupported encryption algorithm");
+                exit(9);
+            }
+            postio::get_file(file_to_get, &output_directory.to_string(), all_files, &user_profile, delete, enc);
         }
         
         else if matches.is_present("Clear") {

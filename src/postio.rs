@@ -1,12 +1,15 @@
-extern crate openssl;
-extern crate rand;
-
-use openssl::*;
+use dirs::home_dir;
+use openssl::symm::Cipher;
+use openssl::sha;
+use openssl::rsa::Padding;
 use rand::Rng;
 use s3::bucket::Bucket;
 use s3::credentials::Credentials;
+use serde::{Deserialize,Serialize};
 use shellexpand;
-use std::env::{home_dir, var};
+use toml::{to_string, from_str};
+
+use std::env::var;
 use std::fs::{File, remove_file, create_dir_all, OpenOptions};
 use std::io::{Write, stdin, stdout, Error, ErrorKind};
 use std::io::prelude::*;
@@ -14,7 +17,6 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process::exit;
 use std::str;
-use toml::{to_string, from_str};
 
 //Struct to deserialze the config file into 
 #[derive(Serialize,Deserialize,Debug,Clone)]
@@ -34,6 +36,11 @@ pub struct FileBlob {
     pub file: Vec<u8>,
     pub key: Vec<u8>,
     pub iv: Vec<u8>,
+}
+
+pub enum Encryption {
+    AES,
+    Chacha
 }
 
 //checks path for existance of config file
@@ -363,7 +370,44 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     file_blob_for_aws
 }
 
-//AES Decryption (for the file file)
+//ChaCha20 Encryptor
+pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
+    let mut iv = Vec::new();
+    let mut key = Vec::new();
+    let mut rng = rand::thread_rng();
+
+    //checking keys in postio config 
+    check_config_files_config(&pconfig).expect("Error, something is wrong with your config file"); 
+    
+    //randomizing IV (16 bytes)
+    for _ in 0..16 {
+        iv.push(rng.gen::<u8>());
+    }
+    //randomizing symmetic key (32 bytes)
+    for _ in 0..32 {
+        key.push(rng.gen::<u8>());
+    }
+
+    //opening file to encrypt
+    let path_expansion = shellexpand::full(&file_path).expect("Cannot expand file path").to_string();
+    let full_file_path = Path::new(&path_expansion);
+    let mut unencrypted_file = File::open(full_file_path).unwrap();
+    let mut file_buffer = Vec::new();
+        unencrypted_file.read_to_end(&mut file_buffer).expect("Unable to read file");
+
+    let encrypted_file = openssl::symm::encrypt(Cipher::chacha20(), &key, Some(&iv), &file_buffer);
+    
+    //encrypying IV,Key with public key of receiver
+    let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
+
+    //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
+    let file_blob_for_aws: FileBlob = FileBlob{file: encrypted_file.unwrap(), key: encrypted_key, iv: encrypted_iv};
+
+    //return blob
+    file_blob_for_aws
+}
+
+//AES Decryption 
 pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
@@ -379,6 +423,29 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
 
     //decrypting file with iv,key
     let unencrypted =  openssl::symm::decrypt(openssl::symm::Cipher::aes_256_cbc(), &key, Some(&iv), &encrypted);
+
+    //writing file out
+    let fileout = Path::new(&out_file_holder);
+    let mut decrypted_file_path = File::create(fileout).expect("Unable to write file to disk");
+        decrypted_file_path.write_all(&unencrypted.unwrap()).expect("unable to write encrypted file");
+}
+
+//ChaCha20 Decryption 
+pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
+    //disecting fileblob from AWS
+    let encrypted = file_from_aws.file;
+    let encrypted_key = file_from_aws.key;
+    let encrypted_iv = file_from_aws.iv;
+
+    let out_file_holder = shellexpand::full(&out_file_path).expect("Cannot convert output directory to path!").to_string();
+
+    check_config_files_config(&postio_config).expect("Error, something is wrong with your config file");
+
+    //decrypting IV,Key with private certificates
+    let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
+
+    //decrypting file with iv,key
+    let unencrypted =  openssl::symm::decrypt(Cipher::chacha20(), &key, Some(&iv), &encrypted);
 
     //writing file out
     let fileout = Path::new(&out_file_holder);
@@ -404,12 +471,12 @@ pub fn rsa_encrypter(pconfig: Config, to_user: String, unencrypted_iv: Vec<u8>, 
         pv_key.read_to_end(&mut private_key).expect("Unable to read Private key (for encryption)");
 
     //enabling keys with openssl for RSA decryption
-    let mut _keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-    _keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
+    //let mut _keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
+    let mut _keys =  openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
 
     //encrypting IV,Keys
-    let _iv_out = _keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, openssl::rsa::PKCS1_OAEP_PADDING);
-    let _key_out = _keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _iv_out = _keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, Padding::PKCS1_OAEP);
+    let _key_out = _keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, Padding::PKCS1_OAEP);
 
     (enc_buffer_iv.to_vec(), enc_buffer_key.to_vec())
 }
@@ -428,10 +495,10 @@ pub fn rsa_decrypter(private_key_path: String, iv_to_decrypt: Vec<u8>, key_to_de
     let mut decrypted_key = [0u8;512]; //32
 
     //decrypting and truncated buffer to original lengths
-    let _file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, Padding::PKCS1_OAEP);
         let decrypted_iv_trunct: Vec<u8> = decrypted_iv[0..16].to_vec();
 
-    let _file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, openssl::rsa::PKCS1_OAEP_PADDING);
+    let _file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, Padding::PKCS1_OAEP);
         let decrypted_key_trunct: Vec<u8> = decrypted_key[0..32].to_vec();
 
     (decrypted_iv_trunct, decrypted_key_trunct)
@@ -621,12 +688,15 @@ pub fn aws_file_getter(file_name: &String, username: &String, file_region: &Stri
 }
 
 //Gets receives public key, Encrypts, and sends file
-pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config) {
+pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config, encrypt: Encryption) {
     println!("\nSending file: {}", sending_file_path);
 
     //encrypting and sending a file to the AWS
     //Encrypting
-    let out_blob: FileBlob = aes_encrypter(sending_file_path.to_owned(), pconfig.to_owned(), to_user.to_owned());
+    let out_blob: FileBlob = match encrypt {
+        Encryption::AES => aes_encrypter(sending_file_path.to_owned(), pconfig.to_owned(), to_user.to_owned()),
+        Encryption::Chacha => chacha_encrypter(sending_file_path.to_owned(), pconfig.to_owned(), to_user.to_owned()),
+    };
 
     //serializing to sent to AWS (need Vec<u8>) 
     let file_to_aws = to_string(&out_blob).unwrap();
@@ -639,7 +709,7 @@ pub fn send_file(sending_file_path: &String, to_user: &String, pconfig: &Config)
 }
 
 //Gets file from AWS and decrypts
-pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, all: bool, pconfig: &Config, delete_file: bool) {
+pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, all: bool, pconfig: &Config, delete_file: bool, encrypt: Encryption) {
     let file_list: Vec<String> =  list_files_in_folder(&pconfig.email, &pconfig.file_store_region, &pconfig.file_store, false);
 
         if file_list.len() == 0 {
@@ -672,7 +742,10 @@ pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, al
                 else {
                     output_file_directory = output_directory.to_string();
                 }
-                aes_decrypter(output_file_directory, out, pconfig.to_owned());                 
+                match encrypt {
+                    Encryption::AES => aes_decrypter(output_file_directory, out, pconfig.to_owned()),
+                    Encryption::Chacha => chacha_decrypter(output_file_directory, out, pconfig.to_owned()), 
+                }                 
             }
         }
         else {
@@ -716,6 +789,10 @@ pub fn get_file(file_name_wrapper: Option<String>, output_directory: &String, al
                 else {
                     output_file_directory = output_directory.to_string();
                 }
-                aes_decrypter(output_file_directory, out, pconfig.to_owned());
+
+                match encrypt {
+                    Encryption::AES => aes_decrypter(output_file_directory, out, pconfig.to_owned()),
+                    Encryption::Chacha => chacha_decrypter(output_file_directory, out, pconfig.to_owned()), 
+                }  
         }
     }
