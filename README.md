@@ -4,12 +4,33 @@
  Postio is a encrypted file sender and receiver. Written in [Rust](https://www.rust-lang.org/en-US/) Postio will encrypt a file (Using [AES-256](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) in [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29) mode) and send this file to an [AWS S3](https://aws.amazon.com/s3/). The initialization vector (IV) and symmetric key are also encrypted with [RSA-4096](https://en.wikipedia.org/wiki/RSA_(cryptosystem)) private/public keys. Your public key is sent to the AWS S3 store (different S3 instance) for the sender to get your public key to properly encrypt the file. 
 
 ## How to Install
-First you can clone the git repo and build yourself. 
-- Current the code compiles on Mac OSX (10.12.5 Sierra), and CentOS 7.
-  - If you compile yourself make sure you have `openssl`, `openssl-devel`, and `gcc` already installed on your machine
-- You'll need OpenSSL (for the crypto bindings) to compile.
 
-Next, you'll want to add your AWS key ID and secret access key in your environment. You can do this in unix by adding this to your `.bashrc` or `.bash_profile` and running `source ~/.bashrc`or `source ~/.bash_profile` or by adding these to the terminal you currently have open:
+You'll definitely need [rust](https://rustup.rs) if you want to compile from source, also `git`. 
+
+### MacOS
+
+ - Required packages
+  - `homebrew`
+  - `openssl@1.1` (via `homebrew`)
+
+### CentOS (Fedora)
+
+ - `gcc`
+ - `zlib-devel`
+ - `openssl-devel` (version 1.0.2+ or if you want to use ChaCha version 1.1.0+)
+
+### Ubuntu (Debian)
+
+ - Required packages
+  - `gcc`
+  - `make`
+  - `openssl` (version 1.0.2+ or if you want to use ChaCha version 1.1.0+)
+  - `libssl-dev`
+  - `zlib1g-dev` (for zlib compression)
+
+Finally install `postio` by `cargo install postio`
+
+Next, you'll want to add your AWS key ID and secret access key in your environment. You can do this in unix by adding this to your `.bashrc` or `.bash_profile` and running `source ~/.bashrc`or `source ~/.bash_profile` or by adding these to the terminal you currently have open (limit control of these files, and make sure you do not accidently check them in to a git repository!):
 
 ```
 export AWS_ACCESS_KEY_ID="your_key_id_here"
@@ -17,8 +38,6 @@ export AWS_SECRET_ACCESS_KEY="your_secret_access_here"
 ```
 
 After that and you have a working binary you are good to go!
-
-By the way, you can grab the pre-compiled binaries (in the near future) by doing `cargo install postio`: 
 
 ## Options
 ```
