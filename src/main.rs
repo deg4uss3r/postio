@@ -32,8 +32,9 @@ fn main() {
         .arg(Arg::with_name("Encryption")
             .long("encrypt")
             .takes_value(true)
+            .value_name("AES or ChaCha")
             .default_value("AES")
-            .help("Set the encryption algorithm (default: AES; supported: chacha, AES (256 in CBC mode))"))
+            .help("Set the encryption algorithm"))
         .arg(Arg::with_name("All")
             .short("a")
             .long("all")
@@ -60,7 +61,6 @@ fn main() {
             .short("g")
             .value_name("number in queue")
             .takes_value(true)
-            .default_value("")
             .display_order(3)
             .help("Gets file from queue"))
         .arg(Arg::with_name("List")
@@ -99,7 +99,7 @@ if matches.is_present("Setup") {
 
     postio::create_config(user_defined_path);
 }
-else {    
+else if matches.is_present("List") || matches.is_present("Send") || matches.is_present("Get") || matches.is_present("Clear") {    
         let home_directory_path = home_dir().unwrap();
         let default_postio_path = home_directory_path.join(".postio/config");
         let config_file = matches.value_of("Config").unwrap_or(default_postio_path.to_str().unwrap());
@@ -171,11 +171,9 @@ else {
                 postio::aws_file_deleter(&user_profile.email, &user_profile.file_store_region, &user_profile.file_store, file);
             }
         }
-
-        else {
-            let mut help = stdout();
-            app.write_help(&mut help).expect("Cannot Get help...I should see a doctor");
-            print!("\n");
-        }
+    } else {
+        let mut help = stdout();
+        app.write_help(&mut help).expect("Cannot Get help...I should see a doctor");
+        print!("\n")
     }
 }

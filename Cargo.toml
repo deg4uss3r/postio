@@ -1,6 +1,6 @@
 [package]
 name = "postio"
-version = "0.3.0"
+version = "0.4.1"
 authors = ["deg4uss3r <ricky@hosfelt.io>"]
 description = "postio - Encrypted file sender/queue/receiver using an AWS S3 backend"
 homepage = "https://github.com/deg4uss3r/postio"
