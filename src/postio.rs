@@ -1,13 +1,21 @@
 use dirs::home_dir;
-use openssl::rsa::Padding;
 use openssl::sha;
 use openssl::symm::Cipher;
-use rand::Rng;
+use openssl::symm::encrypt;
+use openssl::symm::decrypt;
+
+use rand::prelude::*;
+use rand_os::OsRng;
+
 use s3::bucket::Bucket;
 use s3::credentials::Credentials;
 use serde::{Deserialize, Serialize};
 use shellexpand;
 use toml::{from_str, to_string};
+
+use x25519_dalek::StaticSecret;
+use x25519_dalek::PublicKey;
+use x25519_dalek::SharedSecret;
 
 use std::env::var;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
@@ -34,8 +42,8 @@ pub struct Config {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileBlob {
     pub file: Vec<u8>,
-    pub key: Vec<u8>,
     pub iv: Vec<u8>,
+    pub from: String,
 }
 
 pub enum Encryption {
@@ -43,7 +51,7 @@ pub enum Encryption {
     Chacha,
 }
 
-//checks path for existance of config file
+//checks path for existence of config file
 pub fn check_for_config(user_defined_path: &String) -> bool {
     let user_path = Path::new(&user_defined_path);
 
@@ -108,6 +116,11 @@ pub fn create_config(user_defined_path: String) {
     //safely getting default location for the config
     let home_dir = home_dir().unwrap();
     let mut postio_dir = home_dir.join(".postio");
+
+    if !postio_dir.is_dir() {
+        create_dir_all(&postio_dir);
+    }
+
     let postio_config_file_path;
 
     if user_defined_path == "" {
@@ -130,8 +143,8 @@ pub fn create_config(user_defined_path: String) {
     let mut private_key_path = String::new();
     let mut public_key_path = String::new();
 
-    //get RSA keys or create them
-    print!("Do you have 4096-bit RSA pub/private keys in PEM format? [Y/N]: ");
+    //get EC keys or create them
+    print!("Do you have x25519 pub/private keys? [Y/N]: ");
     stdout().flush().expect("Unable to flush stdout");
     let mut key_maybe = String::new();
     stdin()
@@ -161,10 +174,11 @@ pub fn create_config(user_defined_path: String) {
     } else if key_maybe == "N" {
         //generate keys for them if they say no
 
-        let keys = openssl::rsa::Rsa::generate(4096).unwrap();
-        let privy = &keys.private_key_to_pem().unwrap();
+        let mut keys_rand = OsRng::new().unwrap();
+        let private_key = StaticSecret::new(&mut keys_rand);
+        let public_key = PublicKey::from(&private_key);
 
-        let private_key_dir = postio_dir.to_owned().join("private_key.pem");
+        let private_key_dir = postio_dir.to_owned().join("private_key.secret");
         let mut sender_priv = OpenOptions::new()
             .create(true)
             .write(true)
@@ -172,26 +186,26 @@ pub fn create_config(user_defined_path: String) {
             .open(private_key_dir)
             .expect("Unable to write file to disk");
         sender_priv
-            .write_all(&privy)
+            .write_all(&private_key.to_bytes())
             .expect("Unable to write private key");
 
-        let pubby = &keys.public_key_to_pem().unwrap();
+
         let mut sender_pub =
-            File::create(postio_dir.to_owned().join("public_key.pem").as_path()).unwrap();
+            File::create(postio_dir.to_owned().join("public_key").as_path()).unwrap();
         sender_pub
-            .write_all(&pubby)
+            .write_all(public_key.as_bytes())
             .expect("Unable to create public key");
 
         private_key_path = home_dir
             .to_owned()
-            .join(".postio/private_key.pem")
+            .join(".postio/private_key.secret")
             .as_path()
             .to_str()
             .unwrap()
             .to_owned();
         public_key_path = home_dir
             .to_owned()
-            .join(".postio/public_key.pem")
+            .join(".postio/public_key")
             .as_path()
             .to_str()
             .unwrap()
@@ -404,10 +418,55 @@ pub fn read_config(config_file_path: &String) -> Config {
     }
 }
 
+fn open_private_key(pconfig: &Config) -> Result<[u8; 32], Error>{
+    let file_path = &pconfig.private_key;
+    let mut file = File::open(file_path)?;
+    
+    let mut key = [0u8; 32];
+    file.read_exact(&mut key)?;
+
+    Ok(key)
+}
+
+fn open_receiver_public_key(to_user: &String, pconfig: &Config) -> Result<[u8; 32], Error> {
+    let public_key_string = aws_file_getter(
+        &"public_key".to_string(),
+        &to_user,
+        &pconfig.public_key_store_region,
+        &pconfig.public_key_store,
+    );
+
+    let mut public_key = [0u8; 32];
+    public_key.copy_from_slice(public_key_string.as_slice());
+
+    Ok(public_key)
+}
+
+fn create_shared_secret(private_key: [u8; 32], public_key: [u8; 32]) -> Result<SharedSecret, Error> {
+    let k_secret = StaticSecret::from(private_key);
+    let k_public = PublicKey::from(public_key);
+    let shared = k_secret.diffie_hellman(&k_public);
+
+    Ok(shared)
+}
+
+fn open_sender_public_key(to_user: &String, pconfig: &Config) -> Result<[u8; 32], Error> {
+    let public_key_string = aws_file_getter_withoutsha(
+        &"public_key".to_string(),
+        &to_user,
+        &pconfig.public_key_store_region,
+        &pconfig.public_key_store,
+    );
+
+    let mut public_key = [0u8; 32];
+    public_key.copy_from_slice(public_key_string.as_slice());
+
+    Ok(public_key)
+}
+
 //AES Encryption (for the file)
 pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
-    let mut key = Vec::new();
     let mut rng = rand::thread_rng();
 
     //checking keys in postio config
@@ -417,10 +476,15 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     for _ in 0..16 {
         iv.push(rng.gen::<u8>());
     }
-    //randomizing symmetic key (32 bytes)
-    for _ in 0..32 {
-        key.push(rng.gen::<u8>());
-    }
+
+    //loading private key
+    let key = open_private_key(&pconfig).unwrap();
+
+    //Getting public key of sending user
+    let user_public_key = open_receiver_public_key(&to_user, &pconfig).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //opening file to encrypt
     let path_expansion = shellexpand::full(&file_path)
@@ -433,21 +497,23 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
         .read_to_end(&mut file_buffer)
         .expect("Unable to read file");
 
-    let encrypted_file = openssl::symm::encrypt(
-        openssl::symm::Cipher::aes_256_cbc(),
-        &key,
+    let encrypted_file = encrypt(
+        Cipher::aes_256_cbc(),
+        s_key.as_bytes(),
         Some(&iv),
         &file_buffer,
     );
 
-    //encrypying IV,Key with public key of receiver
-    let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
+    //Preparing to put the user hash into the file blob 
+    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
+    let user_sha_vec = user_sha.to_vec();
+    let user_sha_string = vec_to_hex_string(user_sha_vec);
 
-    //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
+    //putting file, IV, together into a blob and sending to AWS S3
     let file_blob_for_aws: FileBlob = FileBlob {
         file: encrypted_file.unwrap(),
-        key: encrypted_key,
-        iv: encrypted_iv,
+        iv: iv,
+        from: user_sha_string,
     };
 
     //return blob
@@ -457,7 +523,6 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
 //ChaCha20 Encryptor
 pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
-    let mut key = Vec::new();
     let mut rng = rand::thread_rng();
 
     //checking keys in postio config
@@ -467,10 +532,14 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
     for _ in 0..16 {
         iv.push(rng.gen::<u8>());
     }
-    //randomizing symmetic key (32 bytes)
-    for _ in 0..32 {
-        key.push(rng.gen::<u8>());
-    }
+
+    let key = open_private_key(&pconfig).unwrap();
+
+    //Getting receiver Public Key
+    let user_public_key = open_receiver_public_key(&to_user, &pconfig).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //opening file to encrypt
     let path_expansion = shellexpand::full(&file_path)
@@ -483,16 +552,18 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
         .read_to_end(&mut file_buffer)
         .expect("Unable to read file");
 
-    let encrypted_file = openssl::symm::encrypt(Cipher::chacha20(), &key, Some(&iv), &file_buffer);
+    let encrypted_file = encrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &file_buffer);
 
-    //encrypying IV,Key with public key of receiver
-    let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
+    //Preparing to put the user hash into the file blob 
+    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
+    let user_sha_vec = user_sha.to_vec();
+    let user_sha_string = vec_to_hex_string(user_sha_vec);
 
-    //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
+    //putting file, IV, together into a blob and sending to AWS S3
     let file_blob_for_aws: FileBlob = FileBlob {
         file: encrypted_file.unwrap(),
-        key: encrypted_key,
-        iv: encrypted_iv,
+        iv: iv,
+        from: user_sha_string,
     };
 
     //return blob
@@ -503,8 +574,9 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
 pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
-    let encrypted_key = file_from_aws.key;
-    let encrypted_iv = file_from_aws.iv;
+    let key = open_private_key(&postio_config).unwrap();
+    let iv = file_from_aws.iv;
+    let from_user = file_from_aws.from;
 
     let out_file_holder = shellexpand::full(&out_file_path)
         .expect("Cannot convert output directory to path!")
@@ -513,13 +585,16 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
     check_config_files_config(&postio_config)
         .expect("Error, something is wrong with your config file");
 
-    //decrypting IV,Key with private certificates
-    let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
+    //Getting sender public key
+    let user_public_key = open_sender_public_key(&from_user, &postio_config).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //decrypting file with iv,key
-    let unencrypted = openssl::symm::decrypt(
-        openssl::symm::Cipher::aes_256_cbc(),
-        &key,
+    let unencrypted = decrypt(
+        Cipher::aes_256_cbc(),
+        s_key.as_bytes(),
         Some(&iv),
         &encrypted,
     );
@@ -536,8 +611,9 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
 pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
-    let encrypted_key = file_from_aws.key;
-    let encrypted_iv = file_from_aws.iv;
+    let key = open_private_key(&postio_config).unwrap();
+    let iv = file_from_aws.iv;
+    let from_user = file_from_aws.from;
 
     let out_file_holder = shellexpand::full(&out_file_path)
         .expect("Cannot convert output directory to path!")
@@ -546,11 +622,14 @@ pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_c
     check_config_files_config(&postio_config)
         .expect("Error, something is wrong with your config file");
 
-    //decrypting IV,Key with private certificates
-    let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
+    //Getting sender public key
+    let user_public_key = open_sender_public_key(&from_user, &postio_config).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //decrypting file with iv,key
-    let unencrypted = openssl::symm::decrypt(Cipher::chacha20(), &key, Some(&iv), &encrypted);
+    let unencrypted = decrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &encrypted);
 
     //writing file out
     let fileout = Path::new(&out_file_holder);
@@ -558,75 +637,6 @@ pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_c
     decrypted_file_path
         .write_all(&unencrypted.unwrap())
         .expect("unable to write encrypted file");
-}
-
-//RSA Encryption for sending IV,Key for AES encryption
-pub fn rsa_encrypter(
-    pconfig: Config,
-    to_user: String,
-    unencrypted_iv: Vec<u8>,
-    unencrypted_key: Vec<u8>,
-) -> (Vec<u8>, Vec<u8>) {
-    //setting output buffer to write encrypted files to
-    let mut enc_buffer_iv = [0u8; 512]; //16 bytes
-    let mut enc_buffer_key = [0u8; 512]; //32 bytes
-
-    //getting public key of receiver
-    let public_key = aws_file_getter(
-        &"public_key".to_string(),
-        &to_user,
-        &pconfig.public_key_store_region,
-        &pconfig.public_key_store,
-    );
-
-    //checking postio config for key existance
-    check_config_files_config(&pconfig).expect("Error, something is wrong with your config file");
-
-    //opening your private key
-    let mut pv_key = File::open(pconfig.private_key).expect("Private Key Error in RSA encryption");
-    let mut private_key: Vec<u8> = Vec::new();
-    pv_key
-        .read_to_end(&mut private_key)
-        .expect("Unable to read Private key (for encryption)");
-
-    //enabling keys with openssl for RSA decryption
-    //let mut _keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-    let mut _keys = openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
-
-    //encrypting IV,Keys
-    let _iv_out = _keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, Padding::PKCS1_OAEP);
-    let _key_out = _keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, Padding::PKCS1_OAEP);
-
-    (enc_buffer_iv.to_vec(), enc_buffer_key.to_vec())
-}
-
-//RSA decryption to receive IV,Key and decrypt the file
-pub fn rsa_decrypter(
-    private_key_path: String,
-    iv_to_decrypt: Vec<u8>,
-    key_to_decrypt: Vec<u8>,
-) -> (Vec<u8>, Vec<u8>) {
-    //opening your private key to decrypt IV,Key
-    let mut private_key_file = File::open(private_key_path).expect("Error opening private key");
-    let mut private_key: Vec<u8> = Vec::new();
-    private_key_file
-        .read_to_end(&mut private_key)
-        .expect("Not able to read private key!");
-
-    let keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-
-    //buffer for decrypted iv,keys
-    let mut decrypted_iv = [0u8; 512]; //16
-    let mut decrypted_key = [0u8; 512]; //32
-
-    //decrypting and truncated buffer to original lengths
-    let _file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, Padding::PKCS1_OAEP);
-    let decrypted_iv_trunct: Vec<u8> = decrypted_iv[0..16].to_vec();
-
-    let _file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, Padding::PKCS1_OAEP);
-    let decrypted_key_trunct: Vec<u8> = decrypted_key[0..32].to_vec();
-
-    (decrypted_iv_trunct, decrypted_key_trunct)
 }
 
 //Loads environmental variables for access to the S3 instances
@@ -835,6 +845,28 @@ pub fn aws_file_getter(
     let user_sha_string = vec_to_hex_string(user_sha_vec);
 
     let (file, code) = bucket.get(&(user_sha_string + "/" + &file_name)).unwrap();
+
+    if code == 200 {
+        return file;
+    } else {
+        println!("Getting the file failed! HTTP: {}", code);
+        exit(1);
+    }
+}
+
+pub fn aws_file_getter_withoutsha(
+    file_name: &String,
+    username: &String,
+    file_region: &String,
+    bucket_name: &String,
+) -> Vec<u8> {
+    let credentials = load_aws_credentials();
+
+    let region = file_region.parse().unwrap();
+
+    let bucket = Bucket::new(&bucket_name, region, credentials);
+
+    let (file, code) = bucket.get(&(format!("{}/{}", username, file_name))).unwrap();
 
     if code == 200 {
         return file;
