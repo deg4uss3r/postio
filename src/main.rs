@@ -124,7 +124,7 @@ fn main() {
             stdin()
                 .read_line(&mut config_continue)
                 .expect("Something went wrong capturing user input");
-            config_continue.trim();
+            config_continue = config_continue.trim().to_string();
             config_continue.pop();
 
             if config_continue.to_lowercase() == "n" {

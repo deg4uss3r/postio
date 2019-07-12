@@ -118,7 +118,7 @@ pub fn create_config(user_defined_path: String) {
     let mut postio_dir = home_dir.join(".postio");
 
     if !postio_dir.is_dir() {
-        create_dir_all(&postio_dir);
+        create_dir_all(&postio_dir).expect(&format!("Error creating directory: {:?}", &postio_dir));
     }
 
     let postio_config_file_path;
@@ -159,7 +159,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut public_key_path)
             .expect("Something went wrong capturing user input");
-        public_key_path.trim();
+        public_key_path = public_key_path.trim().to_string();
         public_key_path.pop();
         public_key_path = (shellexpand::full(&public_key_path).unwrap()).to_string();
 
@@ -168,7 +168,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut private_key_path)
             .expect("Something went wrong capturing user input");
-        private_key_path.trim();
+        private_key_path = private_key_path.trim().to_string();
         private_key_path.pop();
         private_key_path = (shellexpand::full(&private_key_path).unwrap()).to_string();
     } else if key_maybe == "N" {
@@ -221,7 +221,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut user_email)
         .expect("Something went wrong capturing user input");
-    user_email.trim();
+    user_email = user_email.trim().to_string();
     user_email.pop();
 
     //getting S3 file store information
@@ -234,7 +234,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut postio_file_store_answer)
         .expect("Something went wrong capturing user input");
-    postio_file_store_answer.trim();
+    postio_file_store_answer = postio_file_store_answer.trim().to_string();
     postio_file_store_answer.pop();
 
     if postio_file_store_answer.to_uppercase() == "Y".to_string() {
@@ -243,7 +243,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_file_store)
             .expect("Something went wrong capturing user input");
-        postio_file_store.trim();
+        postio_file_store = postio_file_store.trim().to_string();
         postio_file_store.pop();
 
         print!("S3 store region: ");
@@ -251,7 +251,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_file_store_region)
             .expect("Something went wrong capturing user input");
-        postio_file_store_region.trim();
+        postio_file_store_region = postio_file_store_region.trim().to_string();
         postio_file_store_region.pop();
     } else if postio_file_store_answer.to_uppercase() == "N".to_string() {
         postio_file_store = "postio".to_string();
@@ -271,7 +271,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut postio_key_store_answer)
         .expect("Failed reading user input");
-    postio_key_store_answer.trim();
+    postio_key_store_answer = postio_key_store_answer.trim().to_string();
     postio_key_store_answer.pop();
 
     if postio_key_store_answer.to_uppercase() == "Y".to_string() {
@@ -280,7 +280,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_key_store)
             .expect("Failed reading user input");
-        postio_key_store.trim();
+        postio_key_store = postio_key_store.trim().to_string();
         postio_key_store.pop();
 
         print!("S3 store region: ");
@@ -288,7 +288,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_key_store_region)
             .expect("Failed reading user input");
-        postio_key_store_region.trim();
+        postio_key_store_region = postio_key_store_region.trim().to_string();
         postio_key_store_region.pop();
     } else if postio_key_store_answer.to_uppercase() == "N".to_string() {
         postio_key_store = "postio-keys".to_string();
@@ -399,7 +399,7 @@ pub fn read_config(config_file_path: &String) -> Config {
             stdin()
                 .read_line(&mut delete_answer)
                 .expect("User input failed..Sorry");
-            delete_answer.trim();
+            delete_answer = delete_answer.trim().to_string();
             delete_answer.pop();
 
             if delete_answer.to_uppercase() == "Y".to_string() {
@@ -992,7 +992,7 @@ pub fn get_file(
                 stdin()
                     .read_line(&mut file_holder)
                     .expect("Failed reading user input");
-                file_holder.trim();
+                file_holder = file_holder.trim().to_string();
                 file_holder.pop();
                 let file_out = &file_list[file_holder
                     .parse::<usize>()
