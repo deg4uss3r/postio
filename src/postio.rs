@@ -1,13 +1,22 @@
 use dirs::home_dir;
-use openssl::rsa::Padding;
 use openssl::sha;
 use openssl::symm::Cipher;
-use rand::Rng;
+use openssl::symm::encrypt;
+use openssl::symm::decrypt;
+
+use rand::prelude::*;
+use rand_os::OsRng;
+
 use s3::bucket::Bucket;
 use s3::credentials::Credentials;
+use s3::error::{ErrorKind as EK, S3Error};
 use serde::{Deserialize, Serialize};
 use shellexpand;
 use toml::{from_str, to_string};
+
+use x25519_dalek::StaticSecret;
+use x25519_dalek::PublicKey;
+use x25519_dalek::SharedSecret;
 
 use std::env::var;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
@@ -34,8 +43,8 @@ pub struct Config {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileBlob {
     pub file: Vec<u8>,
-    pub key: Vec<u8>,
     pub iv: Vec<u8>,
+    pub from: String,
 }
 
 pub enum Encryption {
@@ -43,7 +52,7 @@ pub enum Encryption {
     Chacha,
 }
 
-//checks path for existance of config file
+//checks path for existence of config file
 pub fn check_for_config(user_defined_path: &String) -> bool {
     let user_path = Path::new(&user_defined_path);
 
@@ -108,6 +117,11 @@ pub fn create_config(user_defined_path: String) {
     //safely getting default location for the config
     let home_dir = home_dir().unwrap();
     let mut postio_dir = home_dir.join(".postio");
+
+    if !postio_dir.is_dir() {
+        create_dir_all(&postio_dir).expect(&format!("Error creating directory: {:?}", &postio_dir));
+    }
+
     let postio_config_file_path;
 
     if user_defined_path == "" {
@@ -130,8 +144,8 @@ pub fn create_config(user_defined_path: String) {
     let mut private_key_path = String::new();
     let mut public_key_path = String::new();
 
-    //get RSA keys or create them
-    print!("Do you have 4096-bit RSA pub/private keys in PEM format? [Y/N]: ");
+    //get EC keys or create them
+    print!("Do you have x25519 pub/private keys? [Y/N]: ");
     stdout().flush().expect("Unable to flush stdout");
     let mut key_maybe = String::new();
     stdin()
@@ -146,7 +160,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut public_key_path)
             .expect("Something went wrong capturing user input");
-        public_key_path.trim();
+        public_key_path = public_key_path.trim().to_string();
         public_key_path.pop();
         public_key_path = (shellexpand::full(&public_key_path).unwrap()).to_string();
 
@@ -155,16 +169,17 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut private_key_path)
             .expect("Something went wrong capturing user input");
-        private_key_path.trim();
+        private_key_path = private_key_path.trim().to_string();
         private_key_path.pop();
         private_key_path = (shellexpand::full(&private_key_path).unwrap()).to_string();
     } else if key_maybe == "N" {
         //generate keys for them if they say no
 
-        let keys = openssl::rsa::Rsa::generate(4096).unwrap();
-        let privy = &keys.private_key_to_pem().unwrap();
+        let mut keys_rand = OsRng::new().unwrap();
+        let private_key = StaticSecret::new(&mut keys_rand);
+        let public_key = PublicKey::from(&private_key);
 
-        let private_key_dir = postio_dir.to_owned().join("private_key.pem");
+        let private_key_dir = postio_dir.to_owned().join("private_key.secret");
         let mut sender_priv = OpenOptions::new()
             .create(true)
             .write(true)
@@ -172,26 +187,26 @@ pub fn create_config(user_defined_path: String) {
             .open(private_key_dir)
             .expect("Unable to write file to disk");
         sender_priv
-            .write_all(&privy)
+            .write_all(&private_key.to_bytes())
             .expect("Unable to write private key");
 
-        let pubby = &keys.public_key_to_pem().unwrap();
+
         let mut sender_pub =
-            File::create(postio_dir.to_owned().join("public_key.pem").as_path()).unwrap();
+            File::create(postio_dir.to_owned().join("public_key").as_path()).unwrap();
         sender_pub
-            .write_all(&pubby)
+            .write_all(public_key.as_bytes())
             .expect("Unable to create public key");
 
         private_key_path = home_dir
             .to_owned()
-            .join(".postio/private_key.pem")
+            .join(".postio/private_key.secret")
             .as_path()
             .to_str()
             .unwrap()
             .to_owned();
         public_key_path = home_dir
             .to_owned()
-            .join(".postio/public_key.pem")
+            .join(".postio/public_key")
             .as_path()
             .to_str()
             .unwrap()
@@ -207,7 +222,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut user_email)
         .expect("Something went wrong capturing user input");
-    user_email.trim();
+    user_email = user_email.trim().to_string();
     user_email.pop();
 
     //getting S3 file store information
@@ -220,7 +235,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut postio_file_store_answer)
         .expect("Something went wrong capturing user input");
-    postio_file_store_answer.trim();
+    postio_file_store_answer = postio_file_store_answer.trim().to_string();
     postio_file_store_answer.pop();
 
     if postio_file_store_answer.to_uppercase() == "Y".to_string() {
@@ -229,7 +244,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_file_store)
             .expect("Something went wrong capturing user input");
-        postio_file_store.trim();
+        postio_file_store = postio_file_store.trim().to_string();
         postio_file_store.pop();
 
         print!("S3 store region: ");
@@ -237,7 +252,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_file_store_region)
             .expect("Something went wrong capturing user input");
-        postio_file_store_region.trim();
+        postio_file_store_region = postio_file_store_region.trim().to_string();
         postio_file_store_region.pop();
     } else if postio_file_store_answer.to_uppercase() == "N".to_string() {
         postio_file_store = "postio".to_string();
@@ -257,7 +272,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut postio_key_store_answer)
         .expect("Failed reading user input");
-    postio_key_store_answer.trim();
+    postio_key_store_answer = postio_key_store_answer.trim().to_string();
     postio_key_store_answer.pop();
 
     if postio_key_store_answer.to_uppercase() == "Y".to_string() {
@@ -266,7 +281,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_key_store)
             .expect("Failed reading user input");
-        postio_key_store.trim();
+        postio_key_store = postio_key_store.trim().to_string();
         postio_key_store.pop();
 
         print!("S3 store region: ");
@@ -274,7 +289,7 @@ pub fn create_config(user_defined_path: String) {
         stdin()
             .read_line(&mut postio_key_store_region)
             .expect("Failed reading user input");
-        postio_key_store_region.trim();
+        postio_key_store_region = postio_key_store_region.trim().to_string();
         postio_key_store_region.pop();
     } else if postio_key_store_answer.to_uppercase() == "N".to_string() {
         postio_key_store = "postio-keys".to_string();
@@ -307,12 +322,12 @@ pub fn create_config(user_defined_path: String) {
         "Adding public keys for {} to {}:{}",
         user_name, pub_key_reg, pub_key_bucket
     );
-    add_users_folder(user_name, pub_key_reg, pub_key_bucket);
+    add_users_folder(user_name, pub_key_reg, pub_key_bucket).unwrap();
     println!(
         "Adding file queue for {} to {}:{}",
         user_name, file_store_reg, file_store
     );
-    add_users_folder(user_name, file_store_reg, file_store);
+    add_users_folder(user_name, file_store_reg, file_store).unwrap();
 
     //opening public key
     let mut pub_key = Vec::new();
@@ -328,7 +343,7 @@ pub fn create_config(user_defined_path: String) {
         pub_key,
         &pub_key_reg,
         &pub_key_bucket,
-    );
+    ).unwrap();
 
     //serializing config file
     let postio = to_string(&postio_config_content).unwrap();
@@ -385,7 +400,7 @@ pub fn read_config(config_file_path: &String) -> Config {
             stdin()
                 .read_line(&mut delete_answer)
                 .expect("User input failed..Sorry");
-            delete_answer.trim();
+            delete_answer = delete_answer.trim().to_string();
             delete_answer.pop();
 
             if delete_answer.to_uppercase() == "Y".to_string() {
@@ -404,10 +419,55 @@ pub fn read_config(config_file_path: &String) -> Config {
     }
 }
 
+fn open_private_key(pconfig: &Config) -> Result<[u8; 32], Error>{
+    let file_path = &pconfig.private_key;
+    let mut file = File::open(file_path)?;
+    
+    let mut key = [0u8; 32];
+    file.read_exact(&mut key)?;
+
+    Ok(key)
+}
+
+fn open_receiver_public_key(to_user: &String, pconfig: &Config) -> Result<[u8; 32], Error> {
+    let public_key_string = aws_file_getter(
+        &"public_key".to_string(),
+        &to_user,
+        &pconfig.public_key_store_region,
+        &pconfig.public_key_store,
+    ).unwrap();
+
+    let mut public_key = [0u8; 32];
+    public_key.copy_from_slice(public_key_string.as_slice());
+
+    Ok(public_key)
+}
+
+fn create_shared_secret(private_key: [u8; 32], public_key: [u8; 32]) -> Result<SharedSecret, Error> {
+    let k_secret = StaticSecret::from(private_key);
+    let k_public = PublicKey::from(public_key);
+    let shared = k_secret.diffie_hellman(&k_public);
+
+    Ok(shared)
+}
+
+fn open_sender_public_key(to_user: &String, pconfig: &Config) -> Result<[u8; 32], Error> {
+    let public_key_string = aws_file_getter_withoutsha(
+        &"public_key".to_string(),
+        &to_user,
+        &pconfig.public_key_store_region,
+        &pconfig.public_key_store,
+    ).unwrap();
+
+    let mut public_key = [0u8; 32];
+    public_key.copy_from_slice(public_key_string.as_slice());
+
+    Ok(public_key)
+}
+
 //AES Encryption (for the file)
 pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
-    let mut key = Vec::new();
     let mut rng = rand::thread_rng();
 
     //checking keys in postio config
@@ -417,10 +477,15 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     for _ in 0..16 {
         iv.push(rng.gen::<u8>());
     }
-    //randomizing symmetic key (32 bytes)
-    for _ in 0..32 {
-        key.push(rng.gen::<u8>());
-    }
+
+    //loading private key
+    let key = open_private_key(&pconfig).unwrap();
+
+    //Getting public key of sending user
+    let user_public_key = open_receiver_public_key(&to_user, &pconfig).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //opening file to encrypt
     let path_expansion = shellexpand::full(&file_path)
@@ -433,21 +498,23 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
         .read_to_end(&mut file_buffer)
         .expect("Unable to read file");
 
-    let encrypted_file = openssl::symm::encrypt(
-        openssl::symm::Cipher::aes_256_cbc(),
-        &key,
+    let encrypted_file = encrypt(
+        Cipher::aes_256_cbc(),
+        s_key.as_bytes(),
         Some(&iv),
         &file_buffer,
     );
 
-    //encrypying IV,Key with public key of receiver
-    let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
+    //Preparing to put the user hash into the file blob 
+    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
+    let user_sha_vec = user_sha.to_vec();
+    let user_sha_string = vec_to_hex_string(user_sha_vec);
 
-    //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
+    //putting file, IV, together into a blob and sending to AWS S3
     let file_blob_for_aws: FileBlob = FileBlob {
         file: encrypted_file.unwrap(),
-        key: encrypted_key,
-        iv: encrypted_iv,
+        iv: iv,
+        from: user_sha_string,
     };
 
     //return blob
@@ -457,7 +524,6 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
 //ChaCha20 Encryptor
 pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> FileBlob {
     let mut iv = Vec::new();
-    let mut key = Vec::new();
     let mut rng = rand::thread_rng();
 
     //checking keys in postio config
@@ -467,10 +533,14 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
     for _ in 0..16 {
         iv.push(rng.gen::<u8>());
     }
-    //randomizing symmetic key (32 bytes)
-    for _ in 0..32 {
-        key.push(rng.gen::<u8>());
-    }
+
+    let key = open_private_key(&pconfig).unwrap();
+
+    //Getting receiver Public Key
+    let user_public_key = open_receiver_public_key(&to_user, &pconfig).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //opening file to encrypt
     let path_expansion = shellexpand::full(&file_path)
@@ -483,16 +553,18 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
         .read_to_end(&mut file_buffer)
         .expect("Unable to read file");
 
-    let encrypted_file = openssl::symm::encrypt(Cipher::chacha20(), &key, Some(&iv), &file_buffer);
+    let encrypted_file = encrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &file_buffer);
 
-    //encrypying IV,Key with public key of receiver
-    let (encrypted_iv, encrypted_key) = rsa_encrypter(pconfig, to_user, iv, key);
+    //Preparing to put the user hash into the file blob 
+    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
+    let user_sha_vec = user_sha.to_vec();
+    let user_sha_string = vec_to_hex_string(user_sha_vec);
 
-    //putting file, IV, and symmetic key, together into a blob and sending to AWS S3
+    //putting file, IV, together into a blob and sending to AWS S3
     let file_blob_for_aws: FileBlob = FileBlob {
         file: encrypted_file.unwrap(),
-        key: encrypted_key,
-        iv: encrypted_iv,
+        iv: iv,
+        from: user_sha_string,
     };
 
     //return blob
@@ -503,8 +575,9 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
 pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
-    let encrypted_key = file_from_aws.key;
-    let encrypted_iv = file_from_aws.iv;
+    let key = open_private_key(&postio_config).unwrap();
+    let iv = file_from_aws.iv;
+    let from_user = file_from_aws.from;
 
     let out_file_holder = shellexpand::full(&out_file_path)
         .expect("Cannot convert output directory to path!")
@@ -513,13 +586,16 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
     check_config_files_config(&postio_config)
         .expect("Error, something is wrong with your config file");
 
-    //decrypting IV,Key with private certificates
-    let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
+    //Getting sender public key
+    let user_public_key = open_sender_public_key(&from_user, &postio_config).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //decrypting file with iv,key
-    let unencrypted = openssl::symm::decrypt(
-        openssl::symm::Cipher::aes_256_cbc(),
-        &key,
+    let unencrypted = decrypt(
+        Cipher::aes_256_cbc(),
+        s_key.as_bytes(),
         Some(&iv),
         &encrypted,
     );
@@ -536,8 +612,9 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
 pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
-    let encrypted_key = file_from_aws.key;
-    let encrypted_iv = file_from_aws.iv;
+    let key = open_private_key(&postio_config).unwrap();
+    let iv = file_from_aws.iv;
+    let from_user = file_from_aws.from;
 
     let out_file_holder = shellexpand::full(&out_file_path)
         .expect("Cannot convert output directory to path!")
@@ -546,11 +623,14 @@ pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_c
     check_config_files_config(&postio_config)
         .expect("Error, something is wrong with your config file");
 
-    //decrypting IV,Key with private certificates
-    let (iv, key) = rsa_decrypter(postio_config.private_key, encrypted_iv, encrypted_key);
+    //Getting sender public key
+    let user_public_key = open_sender_public_key(&from_user, &postio_config).unwrap();
+
+    //Generating the shared secret
+    let s_key = create_shared_secret(key, user_public_key).unwrap();
 
     //decrypting file with iv,key
-    let unencrypted = openssl::symm::decrypt(Cipher::chacha20(), &key, Some(&iv), &encrypted);
+    let unencrypted = decrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &encrypted);
 
     //writing file out
     let fileout = Path::new(&out_file_holder);
@@ -558,75 +638,6 @@ pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_c
     decrypted_file_path
         .write_all(&unencrypted.unwrap())
         .expect("unable to write encrypted file");
-}
-
-//RSA Encryption for sending IV,Key for AES encryption
-pub fn rsa_encrypter(
-    pconfig: Config,
-    to_user: String,
-    unencrypted_iv: Vec<u8>,
-    unencrypted_key: Vec<u8>,
-) -> (Vec<u8>, Vec<u8>) {
-    //setting output buffer to write encrypted files to
-    let mut enc_buffer_iv = [0u8; 512]; //16 bytes
-    let mut enc_buffer_key = [0u8; 512]; //32 bytes
-
-    //getting public key of receiver
-    let public_key = aws_file_getter(
-        &"public_key".to_string(),
-        &to_user,
-        &pconfig.public_key_store_region,
-        &pconfig.public_key_store,
-    );
-
-    //checking postio config for key existance
-    check_config_files_config(&pconfig).expect("Error, something is wrong with your config file");
-
-    //opening your private key
-    let mut pv_key = File::open(pconfig.private_key).expect("Private Key Error in RSA encryption");
-    let mut private_key: Vec<u8> = Vec::new();
-    pv_key
-        .read_to_end(&mut private_key)
-        .expect("Unable to read Private key (for encryption)");
-
-    //enabling keys with openssl for RSA decryption
-    //let mut _keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-    let mut _keys = openssl::rsa::Rsa::public_key_from_pem(&public_key).unwrap();
-
-    //encrypting IV,Keys
-    let _iv_out = _keys.public_encrypt(&unencrypted_iv, &mut enc_buffer_iv, Padding::PKCS1_OAEP);
-    let _key_out = _keys.public_encrypt(&unencrypted_key, &mut enc_buffer_key, Padding::PKCS1_OAEP);
-
-    (enc_buffer_iv.to_vec(), enc_buffer_key.to_vec())
-}
-
-//RSA decryption to receive IV,Key and decrypt the file
-pub fn rsa_decrypter(
-    private_key_path: String,
-    iv_to_decrypt: Vec<u8>,
-    key_to_decrypt: Vec<u8>,
-) -> (Vec<u8>, Vec<u8>) {
-    //opening your private key to decrypt IV,Key
-    let mut private_key_file = File::open(private_key_path).expect("Error opening private key");
-    let mut private_key: Vec<u8> = Vec::new();
-    private_key_file
-        .read_to_end(&mut private_key)
-        .expect("Not able to read private key!");
-
-    let keys = openssl::rsa::Rsa::private_key_from_pem(&private_key).unwrap();
-
-    //buffer for decrypted iv,keys
-    let mut decrypted_iv = [0u8; 512]; //16
-    let mut decrypted_key = [0u8; 512]; //32
-
-    //decrypting and truncated buffer to original lengths
-    let _file_out = keys.private_decrypt(&iv_to_decrypt, &mut decrypted_iv, Padding::PKCS1_OAEP);
-    let decrypted_iv_trunct: Vec<u8> = decrypted_iv[0..16].to_vec();
-
-    let _file_out = keys.private_decrypt(&key_to_decrypt, &mut decrypted_key, Padding::PKCS1_OAEP);
-    let decrypted_key_trunct: Vec<u8> = decrypted_key[0..32].to_vec();
-
-    (decrypted_iv_trunct, decrypted_key_trunct)
 }
 
 //Loads environmental variables for access to the S3 instances
@@ -638,7 +649,7 @@ pub fn load_aws_credentials() -> Credentials {
         .expect("Must specify $AWS_SECRET_ACCESS_KEY in your environment");
 
     //returns credtials type for rust-s3
-    Credentials::new(&aws_access, &aws_secret, None)
+    Credentials::new(Some(aws_access), Some(aws_secret), None, None)
 }
 
 //Sends file to AWS
@@ -648,7 +659,7 @@ pub fn create_file_on_aws(
     file: Vec<u8>,
     region_input: &String,
     bucket_name: &String,
-) {
+) -> Result<(), S3Error> {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -660,23 +671,27 @@ pub fn create_file_on_aws(
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials).unwrap();
 
-    add_users_folder(&user, &region_input, &bucket_name);
+    add_users_folder(&user, &region_input, &bucket_name)?;
 
-    let (_, code) = bucket.put(&user_sha_string, &file, "text/plain").unwrap();
+    let (_, code) = bucket.put_object(&user_sha_string, &file, "text/plain").unwrap();
 
     if code != 200 {
         println!(
             "Sorry there was an error putting this file in the S3 HTTP code: {}",
             code
         );
+
+        Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while uploading file".to_string())))
+    } else {
+        Ok(())
     }
 }
 
 //Adds the users folder if it doesn't exist
 //SHA512 to hide emails
-pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &String) {
+pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &String) -> Result<(), S3Error> {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
@@ -689,16 +704,11 @@ pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &Stri
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
-    // used to use this to verify if the bucket existed
-    // possible that amazon changed the resonse and I cannot tell if it existed
-    // looks like it doesnt matter if I try to create a folder that doesn't exist though
-    //    let response = bucket.list(&user_sha_string, Some(""));
-
-    bucket
-        .put(&user_sha_string, &blank.as_bytes(), "text/plain")
-        .unwrap();
+    let (_, code) = bucket.put_object(&user_sha_string, &blank.as_bytes(), "text/plain")?;
+    
+    Ok(())
 }
 
 //List files in queue
@@ -707,7 +717,7 @@ pub fn list_files_in_folder(
     region_input: &String,
     bucket_name: &String,
     listing: bool,
-) -> Vec<String> {
+) -> Result<Vec<String>, S3Error> {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
@@ -719,12 +729,12 @@ pub fn list_files_in_folder(
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
     let user_name_result = match bucket.list(&user_sha_string, Some("/")) {
         Ok(x) => (x),
         Err(e) => {
-            add_users_folder(user, region_input, bucket_name);
+            add_users_folder(user, region_input, bucket_name)?;
             println!(
                 "Your username wasn't found on the S3, so I added it for you :), now have a friend send you a file\n\tError: {}",
                 e
@@ -739,32 +749,34 @@ pub fn list_files_in_folder(
 
     if code != 200 {
         println!("AWS error: HTTP code: {}", code);
-    }
-
-    //checking if there is a folder with the specified username
-    if list.contents.len() == 0 {
-        println!("Error: the folder was not accessible, or was deleted");
+         Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while trying to get files".to_string())))
     } else {
-        list.contents.remove(0); //removing the first result which is the folder
-        if code != 200 {
-            println!(
-                "Sorry there was an error adding this user folder to the S3 HTTP code: {}",
-                code
-            );
+
+        //checking if there is a folder with the specified username
+        if list.contents.len() == 0 {
+            println!("Error: the folder was not accessible, or was deleted");
         } else {
-            if list.contents.len() > 0 {
-                for (file_count, file_name) in list.contents.iter().enumerate() {
-                    //for each file print the file name
-                    let paths: Vec<&str> = file_name.key.split("/").collect(); //file name has folder name on top of it
-                    output_list.push(paths[1].to_string());
-                    if listing == true {
-                        println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
+            list.contents.remove(0); //removing the first result which is the folder
+            if code != 200 {
+                println!(
+                    "Sorry there was an error adding this user folder to the S3 HTTP code: {}",
+                    code
+                );
+            } else {
+                if list.contents.len() > 0 {
+                    for (file_count, file_name) in list.contents.iter().enumerate() {
+                        //for each file print the file name
+                        let paths: Vec<&str> = file_name.key.split("/").collect(); //file name has folder name on top of it
+                        output_list.push(paths[1].to_string());
+                        if listing == true {
+                            println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
+                        }
                     }
                 }
             }
         }
+        Ok(output_list)
     }
-    output_list
 }
 
 //Stringify Hex to hide users email
@@ -784,7 +796,7 @@ pub fn aws_file_deleter(
     region_input: &String,
     bucket_name: &String,
     file_name: &String,
-) {
+) -> Result<(), S3Error> {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -796,23 +808,20 @@ pub fn aws_file_deleter(
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
-    let out = bucket.delete(&user_sha_string);
+    let out = bucket.delete_object(&user_sha_string);
 
     match out {
         Ok(code) => {
             if code.1 != 204 {
-                println!(
-                    "Deletion of file failed! You'll want to check your bucket settings most likely: HTTP code: {}",
-                    code.1
-                );
-                exit(1);
+                Err(S3Error::from_kind(EK::Msg("Error: Non-204 response code for file deletion".to_string()))) 
+            } else {
+                Ok(())
             }
         }
-        Err(e) => {
-            println!("Deletion of file failed! {}", e);
-            exit(1);
+        Err(_e) => {
+             Err(S3Error::from_kind(EK::Msg("Error: Deletion failed".to_string())))
         }
     }
 }
@@ -823,24 +832,44 @@ pub fn aws_file_getter(
     username: &String,
     file_region: &String,
     bucket_name: &String,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, S3Error> {
     let credentials = load_aws_credentials();
 
     let region = file_region.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
     let user_sha = sha::sha512(username.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let user_sha_string = vec_to_hex_string(user_sha_vec);
 
-    let (file, code) = bucket.get(&(user_sha_string + "/" + &file_name)).unwrap();
+    let (file, code) = bucket.get_object(&(user_sha_string + "/" + &file_name))?;
 
     if code == 200 {
-        return file;
+        Ok(file)
     } else {
-        println!("Getting the file failed! HTTP: {}", code);
-        exit(1);
+         Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while getting file".to_string())))
+    }
+}
+
+pub fn aws_file_getter_withoutsha(
+    file_name: &String,
+    username: &String,
+    file_region: &String,
+    bucket_name: &String,
+) -> Result<Vec<u8>, S3Error> {
+    let credentials = load_aws_credentials();
+
+    let region = file_region.parse().unwrap();
+
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
+
+    let (file, code) = bucket.get_object(&(format!("{}/{}", username, file_name)))?;
+
+    if code == 200 {
+        Ok(file)
+    } else {
+         Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while getting file".to_string())))
     }
 }
 
@@ -850,7 +879,7 @@ pub fn send_file(
     to_user: &String,
     pconfig: &Config,
     encrypt: Encryption,
-) {
+) -> Result<(), S3Error> {
     println!("\nSending file: {}", sending_file_path);
 
     //encrypting and sending a file to the AWS
@@ -881,7 +910,7 @@ pub fn send_file(
         file_to_aws.as_bytes().to_vec(),
         &pconfig.file_store_region,
         &pconfig.file_store,
-    );
+    ) 
 }
 
 //Gets file from AWS and decrypts
@@ -898,7 +927,7 @@ pub fn get_file(
         &pconfig.file_store_region,
         &pconfig.file_store,
         false,
-    );
+    ).unwrap();
 
     if file_list.len() == 0 {
         println!("No files to get! Why not send a file?");
@@ -916,7 +945,7 @@ pub fn get_file(
                 &pconfig.email,
                 &pconfig.file_store_region,
                 &pconfig.file_store,
-            );
+            ).unwrap();
 
             //removing file from AWS
             if delete_file {
@@ -925,7 +954,7 @@ pub fn get_file(
                     &pconfig.file_store_region,
                     &pconfig.file_store,
                     i,
-                ); //create an option to keep this
+                ).unwrap(); //create an option to keep this
             }
 
             //deserializing
@@ -960,7 +989,7 @@ pub fn get_file(
                 stdin()
                     .read_line(&mut file_holder)
                     .expect("Failed reading user input");
-                file_holder.trim();
+                file_holder = file_holder.trim().to_string();
                 file_holder.pop();
                 let file_out = &file_list[file_holder
                     .parse::<usize>()
@@ -977,7 +1006,7 @@ pub fn get_file(
             &pconfig.email,
             &pconfig.file_store_region,
             &pconfig.file_store,
-        );
+        ).unwrap();
 
         //removing file from AWS
         if delete_file {
@@ -986,7 +1015,7 @@ pub fn get_file(
                 &pconfig.file_store_region,
                 &pconfig.file_store,
                 &file_name,
-            ); //create an option to keep this
+            ).unwrap(); //create an option to keep this
         }
 
         //deserializing
