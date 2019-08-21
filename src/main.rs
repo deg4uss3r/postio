@@ -152,7 +152,7 @@ fn main() {
                 &user_profile.file_store_region,
                 &user_profile.file_store,
                 true,
-            );
+            ).unwrap();
             if file_list.len() == 0 {
                 println!("No files in queue, send a file!");
             }
@@ -175,7 +175,7 @@ fn main() {
                 &user_to_send_file.to_string(),
                 &user_profile,
                 enc,
-            );
+            ).unwrap();
         } else if matches.occurrences_of("Get") > 0 {
             let user_file = matches.value_of("Get");
 
@@ -222,14 +222,14 @@ fn main() {
                 &user_profile.file_store_region,
                 &user_profile.file_store,
                 false,
-            );
+            ).unwrap();
             for file in file_list.iter() {
                 postio::aws_file_deleter(
                     &user_profile.email,
                     &user_profile.file_store_region,
                     &user_profile.file_store,
                     file,
-                );
+                ).unwrap();
             }
         }
     } else {

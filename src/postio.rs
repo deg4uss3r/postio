@@ -9,6 +9,7 @@ use rand_os::OsRng;
 
 use s3::bucket::Bucket;
 use s3::credentials::Credentials;
+use s3::error::{ErrorKind as EK, S3Error};
 use serde::{Deserialize, Serialize};
 use shellexpand;
 use toml::{from_str, to_string};
@@ -321,12 +322,12 @@ pub fn create_config(user_defined_path: String) {
         "Adding public keys for {} to {}:{}",
         user_name, pub_key_reg, pub_key_bucket
     );
-    add_users_folder(user_name, pub_key_reg, pub_key_bucket);
+    add_users_folder(user_name, pub_key_reg, pub_key_bucket).unwrap();
     println!(
         "Adding file queue for {} to {}:{}",
         user_name, file_store_reg, file_store
     );
-    add_users_folder(user_name, file_store_reg, file_store);
+    add_users_folder(user_name, file_store_reg, file_store).unwrap();
 
     //opening public key
     let mut pub_key = Vec::new();
@@ -342,7 +343,7 @@ pub fn create_config(user_defined_path: String) {
         pub_key,
         &pub_key_reg,
         &pub_key_bucket,
-    );
+    ).unwrap();
 
     //serializing config file
     let postio = to_string(&postio_config_content).unwrap();
@@ -434,7 +435,7 @@ fn open_receiver_public_key(to_user: &String, pconfig: &Config) -> Result<[u8; 3
         &to_user,
         &pconfig.public_key_store_region,
         &pconfig.public_key_store,
-    );
+    ).unwrap();
 
     let mut public_key = [0u8; 32];
     public_key.copy_from_slice(public_key_string.as_slice());
@@ -456,7 +457,7 @@ fn open_sender_public_key(to_user: &String, pconfig: &Config) -> Result<[u8; 32]
         &to_user,
         &pconfig.public_key_store_region,
         &pconfig.public_key_store,
-    );
+    ).unwrap();
 
     let mut public_key = [0u8; 32];
     public_key.copy_from_slice(public_key_string.as_slice());
@@ -648,7 +649,7 @@ pub fn load_aws_credentials() -> Credentials {
         .expect("Must specify $AWS_SECRET_ACCESS_KEY in your environment");
 
     //returns credtials type for rust-s3
-    Credentials::new(&aws_access, &aws_secret, None)
+    Credentials::new(Some(aws_access), Some(aws_secret), None, None)
 }
 
 //Sends file to AWS
@@ -658,7 +659,7 @@ pub fn create_file_on_aws(
     file: Vec<u8>,
     region_input: &String,
     bucket_name: &String,
-) {
+) -> Result<(), S3Error> {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -670,23 +671,27 @@ pub fn create_file_on_aws(
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials).unwrap();
 
-    add_users_folder(&user, &region_input, &bucket_name);
+    add_users_folder(&user, &region_input, &bucket_name)?;
 
-    let (_, code) = bucket.put(&user_sha_string, &file, "text/plain").unwrap();
+    let (_, code) = bucket.put_object(&user_sha_string, &file, "text/plain").unwrap();
 
     if code != 200 {
         println!(
             "Sorry there was an error putting this file in the S3 HTTP code: {}",
             code
         );
+
+        Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while uploading file".to_string())))
+    } else {
+        Ok(())
     }
 }
 
 //Adds the users folder if it doesn't exist
 //SHA512 to hide emails
-pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &String) {
+pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &String) -> Result<(), S3Error> {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
@@ -699,16 +704,11 @@ pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &Stri
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
-    // used to use this to verify if the bucket existed
-    // possible that amazon changed the resonse and I cannot tell if it existed
-    // looks like it doesnt matter if I try to create a folder that doesn't exist though
-    //    let response = bucket.list(&user_sha_string, Some(""));
-
-    bucket
-        .put(&user_sha_string, &blank.as_bytes(), "text/plain")
-        .unwrap();
+    let (_, code) = bucket.put_object(&user_sha_string, &blank.as_bytes(), "text/plain")?;
+    
+    Ok(())
 }
 
 //List files in queue
@@ -717,7 +717,7 @@ pub fn list_files_in_folder(
     region_input: &String,
     bucket_name: &String,
     listing: bool,
-) -> Vec<String> {
+) -> Result<Vec<String>, S3Error> {
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
@@ -729,12 +729,12 @@ pub fn list_files_in_folder(
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
     let user_name_result = match bucket.list(&user_sha_string, Some("/")) {
         Ok(x) => (x),
         Err(e) => {
-            add_users_folder(user, region_input, bucket_name);
+            add_users_folder(user, region_input, bucket_name)?;
             println!(
                 "Your username wasn't found on the S3, so I added it for you :), now have a friend send you a file\n\tError: {}",
                 e
@@ -749,32 +749,34 @@ pub fn list_files_in_folder(
 
     if code != 200 {
         println!("AWS error: HTTP code: {}", code);
-    }
-
-    //checking if there is a folder with the specified username
-    if list.contents.len() == 0 {
-        println!("Error: the folder was not accessible, or was deleted");
+         Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while trying to get files".to_string())))
     } else {
-        list.contents.remove(0); //removing the first result which is the folder
-        if code != 200 {
-            println!(
-                "Sorry there was an error adding this user folder to the S3 HTTP code: {}",
-                code
-            );
+
+        //checking if there is a folder with the specified username
+        if list.contents.len() == 0 {
+            println!("Error: the folder was not accessible, or was deleted");
         } else {
-            if list.contents.len() > 0 {
-                for (file_count, file_name) in list.contents.iter().enumerate() {
-                    //for each file print the file name
-                    let paths: Vec<&str> = file_name.key.split("/").collect(); //file name has folder name on top of it
-                    output_list.push(paths[1].to_string());
-                    if listing == true {
-                        println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
+            list.contents.remove(0); //removing the first result which is the folder
+            if code != 200 {
+                println!(
+                    "Sorry there was an error adding this user folder to the S3 HTTP code: {}",
+                    code
+                );
+            } else {
+                if list.contents.len() > 0 {
+                    for (file_count, file_name) in list.contents.iter().enumerate() {
+                        //for each file print the file name
+                        let paths: Vec<&str> = file_name.key.split("/").collect(); //file name has folder name on top of it
+                        output_list.push(paths[1].to_string());
+                        if listing == true {
+                            println!("{}) {}", file_count, paths[1]); //will only every be one folder deep by design
+                        }
                     }
                 }
             }
         }
+        Ok(output_list)
     }
-    output_list
 }
 
 //Stringify Hex to hide users email
@@ -794,7 +796,7 @@ pub fn aws_file_deleter(
     region_input: &String,
     bucket_name: &String,
     file_name: &String,
-) {
+) -> Result<(), S3Error> {
     //SHA512 username and emails (no crawling for emails here if we're using public S3s
     let user_sha = sha::sha512(user.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
@@ -806,23 +808,20 @@ pub fn aws_file_deleter(
 
     let region = region_input.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
-    let out = bucket.delete(&user_sha_string);
+    let out = bucket.delete_object(&user_sha_string);
 
     match out {
         Ok(code) => {
             if code.1 != 204 {
-                println!(
-                    "Deletion of file failed! You'll want to check your bucket settings most likely: HTTP code: {}",
-                    code.1
-                );
-                exit(1);
+                Err(S3Error::from_kind(EK::Msg("Error: Non-204 response code for file deletion".to_string()))) 
+            } else {
+                Ok(())
             }
         }
-        Err(e) => {
-            println!("Deletion of file failed! {}", e);
-            exit(1);
+        Err(_e) => {
+             Err(S3Error::from_kind(EK::Msg("Error: Deletion failed".to_string())))
         }
     }
 }
@@ -833,24 +832,23 @@ pub fn aws_file_getter(
     username: &String,
     file_region: &String,
     bucket_name: &String,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, S3Error> {
     let credentials = load_aws_credentials();
 
     let region = file_region.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
     let user_sha = sha::sha512(username.to_lowercase().as_bytes());
     let user_sha_vec = user_sha.to_vec();
     let user_sha_string = vec_to_hex_string(user_sha_vec);
 
-    let (file, code) = bucket.get(&(user_sha_string + "/" + &file_name)).unwrap();
+    let (file, code) = bucket.get_object(&(user_sha_string + "/" + &file_name))?;
 
     if code == 200 {
-        return file;
+        Ok(file)
     } else {
-        println!("Getting the file failed! HTTP: {}", code);
-        exit(1);
+         Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while getting file".to_string())))
     }
 }
 
@@ -859,20 +857,19 @@ pub fn aws_file_getter_withoutsha(
     username: &String,
     file_region: &String,
     bucket_name: &String,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, S3Error> {
     let credentials = load_aws_credentials();
 
     let region = file_region.parse().unwrap();
 
-    let bucket = Bucket::new(&bucket_name, region, credentials);
+    let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
-    let (file, code) = bucket.get(&(format!("{}/{}", username, file_name))).unwrap();
+    let (file, code) = bucket.get_object(&(format!("{}/{}", username, file_name)))?;
 
     if code == 200 {
-        return file;
+        Ok(file)
     } else {
-        println!("Getting the file failed! HTTP: {}", code);
-        exit(1);
+         Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while getting file".to_string())))
     }
 }
 
@@ -882,7 +879,7 @@ pub fn send_file(
     to_user: &String,
     pconfig: &Config,
     encrypt: Encryption,
-) {
+) -> Result<(), S3Error> {
     println!("\nSending file: {}", sending_file_path);
 
     //encrypting and sending a file to the AWS
@@ -913,7 +910,7 @@ pub fn send_file(
         file_to_aws.as_bytes().to_vec(),
         &pconfig.file_store_region,
         &pconfig.file_store,
-    );
+    ) 
 }
 
 //Gets file from AWS and decrypts
@@ -930,7 +927,7 @@ pub fn get_file(
         &pconfig.file_store_region,
         &pconfig.file_store,
         false,
-    );
+    ).unwrap();
 
     if file_list.len() == 0 {
         println!("No files to get! Why not send a file?");
@@ -948,7 +945,7 @@ pub fn get_file(
                 &pconfig.email,
                 &pconfig.file_store_region,
                 &pconfig.file_store,
-            );
+            ).unwrap();
 
             //removing file from AWS
             if delete_file {
@@ -957,7 +954,7 @@ pub fn get_file(
                     &pconfig.file_store_region,
                     &pconfig.file_store,
                     i,
-                ); //create an option to keep this
+                ).unwrap(); //create an option to keep this
             }
 
             //deserializing
@@ -1009,7 +1006,7 @@ pub fn get_file(
             &pconfig.email,
             &pconfig.file_store_region,
             &pconfig.file_store,
-        );
+        ).unwrap();
 
         //removing file from AWS
         if delete_file {
@@ -1018,7 +1015,7 @@ pub fn get_file(
                 &pconfig.file_store_region,
                 &pconfig.file_store,
                 &file_name,
-            ); //create an option to keep this
+            ).unwrap(); //create an option to keep this
         }
 
         //deserializing
