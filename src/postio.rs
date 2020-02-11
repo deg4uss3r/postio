@@ -1,4 +1,10 @@
+use aes::Aes256;
+
+use block_modes::{BlockMode, Cbc};
+use block_modes::block_padding::Pkcs7;
+
 use dirs::home_dir;
+
 use openssl::symm::Cipher;
 use openssl::symm::encrypt;
 use openssl::symm::decrypt;
@@ -151,8 +157,7 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut key_maybe)
         .expect("Something went wrong capturing user input");
-    key_maybe.trim().to_uppercase();
-    key_maybe.pop();
+    key_maybe = key_maybe.trim().to_uppercase();
 
     if key_maybe == "Y" {
         print!("Full path to your public key: ");
@@ -161,7 +166,6 @@ pub fn create_config(user_defined_path: String) {
             .read_line(&mut public_key_path)
             .expect("Something went wrong capturing user input");
         public_key_path = public_key_path.trim().to_string();
-        public_key_path.pop();
         public_key_path = (shellexpand::full(&public_key_path).unwrap()).to_string();
 
         print!("Full path to your private key: ");
@@ -170,7 +174,6 @@ pub fn create_config(user_defined_path: String) {
             .read_line(&mut private_key_path)
             .expect("Something went wrong capturing user input");
         private_key_path = private_key_path.trim().to_string();
-        private_key_path.pop();
         private_key_path = (shellexpand::full(&private_key_path).unwrap()).to_string();
     } else if key_maybe == "N" {
         //generate keys for them if they say no
@@ -212,7 +215,7 @@ pub fn create_config(user_defined_path: String) {
             .unwrap()
             .to_owned();
     } else {
-        println!("Yeah it was a yes or no question... [Y/N]");
+        println!("Yeah it was a yes or no question... [Y/N] you said {:#?}", key_maybe);
         exit(1);
     }
 
@@ -223,7 +226,6 @@ pub fn create_config(user_defined_path: String) {
         .read_line(&mut user_email)
         .expect("Something went wrong capturing user input");
     user_email = user_email.trim().to_string();
-    user_email.pop();
 
     //getting S3 file store information
     let mut postio_file_store_answer = String::new();
@@ -235,17 +237,15 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut postio_file_store_answer)
         .expect("Something went wrong capturing user input");
-    postio_file_store_answer = postio_file_store_answer.trim().to_string();
-    postio_file_store_answer.pop();
+    postio_file_store_answer = postio_file_store_answer.trim().to_uppercase();
 
-    if postio_file_store_answer.to_uppercase() == "Y".to_string() {
+    if postio_file_store_answer == "Y" {
         print!("Amazon S3 store name: ");
         stdout().flush().expect("Unable to flush stdout");
         stdin()
             .read_line(&mut postio_file_store)
             .expect("Something went wrong capturing user input");
         postio_file_store = postio_file_store.trim().to_string();
-        postio_file_store.pop();
 
         print!("S3 store region: ");
         stdout().flush().expect("Unable to flush stdout");
@@ -253,8 +253,7 @@ pub fn create_config(user_defined_path: String) {
             .read_line(&mut postio_file_store_region)
             .expect("Something went wrong capturing user input");
         postio_file_store_region = postio_file_store_region.trim().to_string();
-        postio_file_store_region.pop();
-    } else if postio_file_store_answer.to_uppercase() == "N".to_string() {
+    } else if postio_file_store_answer == "N" {
         postio_file_store = "postio".to_string();
         postio_file_store_region = "eu-west-2".to_string();
     } else {
@@ -272,17 +271,15 @@ pub fn create_config(user_defined_path: String) {
     stdin()
         .read_line(&mut postio_key_store_answer)
         .expect("Failed reading user input");
-    postio_key_store_answer = postio_key_store_answer.trim().to_string();
-    postio_key_store_answer.pop();
+    postio_key_store_answer = postio_key_store_answer.trim().to_uppercase();
 
-    if postio_key_store_answer.to_uppercase() == "Y".to_string() {
+    if postio_key_store_answer == "Y" {
         print!("Amazon S3 public key store name: ");
         stdout().flush().expect("Unable to flush stdout");
         stdin()
             .read_line(&mut postio_key_store)
             .expect("Failed reading user input");
         postio_key_store = postio_key_store.trim().to_string();
-        postio_key_store.pop();
 
         print!("S3 store region: ");
         stdout().flush().expect("Unable to flush stdout");
@@ -290,8 +287,7 @@ pub fn create_config(user_defined_path: String) {
             .read_line(&mut postio_key_store_region)
             .expect("Failed reading user input");
         postio_key_store_region = postio_key_store_region.trim().to_string();
-        postio_key_store_region.pop();
-    } else if postio_key_store_answer.to_uppercase() == "N".to_string() {
+    } else if postio_key_store_answer == "N" {
         postio_key_store = "postio-keys".to_string();
         postio_key_store_region = "eu-central-1".to_string();
     } else {
@@ -497,13 +493,11 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     unencrypted_file
         .read_to_end(&mut file_buffer)
         .expect("Unable to read file");
+  
+    type Aes256Cbc = Cbc<Aes256, Pkcs7>;
 
-    let encrypted_file = encrypt(
-        Cipher::aes_256_cbc(),
-        s_key.as_bytes(),
-        Some(&iv),
-        &file_buffer,
-    );
+    let cipher = Aes256Cbc::new_var(s_key.as_bytes(), &iv).expect("Error creating cipher instance");
+    let encrypted_file = cipher.encrypt_vec(&file_buffer);
 
     //Preparing to put the user hash into the file blob 
     let mut hasher = Sha3_512::new();
@@ -513,7 +507,7 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
 
     //putting file, IV, together into a blob and sending to AWS S3
     let file_blob_for_aws: FileBlob = FileBlob {
-        file: encrypted_file.unwrap(),
+        file: encrypted_file,
         iv: iv,
         from: user_sha_string,
     };
@@ -593,20 +587,16 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
 
     //Generating the shared secret
     let s_key = create_shared_secret(key, user_public_key).unwrap();
+    type Aes256Cbc = Cbc<Aes256, Pkcs7>;
 
-    //decrypting file with iv,key
-    let unencrypted = decrypt(
-        Cipher::aes_256_cbc(),
-        s_key.as_bytes(),
-        Some(&iv),
-        &encrypted,
-    );
+    let cipher = Aes256Cbc::new_var(s_key.as_bytes(), &iv).expect("Error creating cipher instance");
+    let decrypted_file = cipher.decrypt_vec(&encrypted).expect("Error decrypting file");
 
     //writing file out
     let fileout = Path::new(&out_file_holder);
     let mut decrypted_file_path = File::create(fileout).expect("Unable to write file to disk");
     decrypted_file_path
-        .write_all(&unencrypted.unwrap())
+        .write_all(&decrypted_file)
         .expect("unable to write encrypted file");
 }
 
@@ -997,7 +987,6 @@ pub fn get_file(
                     .read_line(&mut file_holder)
                     .expect("Failed reading user input");
                 file_holder = file_holder.trim().to_string();
-                file_holder.pop();
                 let file_out = &file_list[file_holder
                     .parse::<usize>()
                     .expect("Cannot convert the index, try again")];
