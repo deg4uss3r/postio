@@ -1,5 +1,4 @@
 use dirs::home_dir;
-use openssl::sha;
 use openssl::symm::Cipher;
 use openssl::symm::encrypt;
 use openssl::symm::decrypt;
@@ -10,6 +9,7 @@ use rand_os::OsRng;
 use s3::bucket::Bucket;
 use s3::credentials::Credentials;
 use s3::error::{ErrorKind as EK, S3Error};
+use sha3::{Digest, Sha3_512};
 use serde::{Deserialize, Serialize};
 use shellexpand;
 use toml::{from_str, to_string};
@@ -506,8 +506,9 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     );
 
     //Preparing to put the user hash into the file blob 
-    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    let mut hasher = Sha3_512::new();
+    hasher.input(pconfig.email.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let user_sha_string = vec_to_hex_string(user_sha_vec);
 
     //putting file, IV, together into a blob and sending to AWS S3
@@ -555,9 +556,10 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
 
     let encrypted_file = encrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &file_buffer);
 
-    //Preparing to put the user hash into the file blob 
-    let user_sha = sha::sha512(pconfig.email.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    //Preparing to put the user hash into the file blob
+    let mut hasher = Sha3_512::new();
+    hasher.input(pconfig.email.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let user_sha_string = vec_to_hex_string(user_sha_vec);
 
     //putting file, IV, together into a blob and sending to AWS S3
@@ -660,9 +662,10 @@ pub fn create_file_on_aws(
     region_input: &String,
     bucket_name: &String,
 ) -> Result<(), S3Error> {
-    //SHA512 username and emails (no crawling for emails here if we're using public S3s
-    let user_sha = sha::sha512(user.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    //SHA512 username and emails (no crawling for emails here if we're using public S3s)
+    let mut hasher = Sha3_512::new();
+    hasher.input(user.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string += "/";
     user_sha_string += &file_name;
@@ -692,8 +695,9 @@ pub fn create_file_on_aws(
 //Adds the users folder if it doesn't exist
 //SHA512 to hide emails
 pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &String) -> Result<(), S3Error> {
-    let user_sha = sha::sha512(user.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    let mut hasher = Sha3_512::new();
+    hasher.input(user.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string += "/";
 
@@ -718,8 +722,9 @@ pub fn list_files_in_folder(
     bucket_name: &String,
     listing: bool,
 ) -> Result<Vec<String>, S3Error> {
-    let user_sha = sha::sha512(user.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    let mut hasher = Sha3_512::new();
+    hasher.input(user.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string += "/";
 
@@ -797,9 +802,10 @@ pub fn aws_file_deleter(
     bucket_name: &String,
     file_name: &String,
 ) -> Result<(), S3Error> {
-    //SHA512 username and emails (no crawling for emails here if we're using public S3s
-    let user_sha = sha::sha512(user.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    //SHA512 username and emails (no crawling for emails here if we're using public S3s)
+    let mut hasher = Sha3_512::new();
+    hasher.input(user.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let mut user_sha_string = vec_to_hex_string(user_sha_vec);
     user_sha_string += "/";
     user_sha_string += &file_name;
@@ -839,8 +845,9 @@ pub fn aws_file_getter(
 
     let bucket = Bucket::new(&bucket_name, region, credentials)?;
 
-    let user_sha = sha::sha512(username.to_lowercase().as_bytes());
-    let user_sha_vec = user_sha.to_vec();
+    let mut hasher = Sha3_512::new();
+    hasher.input(username.to_lowercase().as_bytes());
+    let user_sha_vec = hasher.result().to_vec();
     let user_sha_string = vec_to_hex_string(user_sha_vec);
 
     let (file, code) = bucket.get_object(&(user_sha_string + "/" + &file_name))?;
