@@ -1,6 +1,6 @@
 [package]
 name = "postio"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["deg4uss3r <ricky@hosfelt.io>"]
 description = "postio - Encrypted file sender/queue/receiver using an AWS S3 backend"
 homepage = "https://github.com/deg4uss3r/postio"
@@ -9,10 +9,17 @@ readme = "README.md"
 license-file = "LICENSE.md"
 edition = "2018"
 
+[build]
+rustflags = "-Ctarget-feature=+avx2"
+
 [dependencies]
+aes = "0.3"
+aead = "0.2"
+block-modes = "0.3"
+chacha20poly1305 = "0.3"
 dirs = "2.0"
 clap = "2.32"
-openssl = { version = "0.10.23", features = ["vendored"]}
+sha3 = "0.8"
 toml = "0.5"
 serde_derive = "1.0"
 serde = {version = "1.0", features = ["derive"]}
