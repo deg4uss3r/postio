@@ -1,13 +1,12 @@
+use aead::{Aead, NewAead, generic_array::GenericArray};
 use aes::Aes256;
 
 use block_modes::{BlockMode, Cbc};
 use block_modes::block_padding::Pkcs7;
 
-use dirs::home_dir;
+use chacha20poly1305::XChaCha20Poly1305;
 
-use openssl::symm::Cipher;
-use openssl::symm::encrypt;
-use openssl::symm::decrypt;
+use dirs::home_dir;
 
 use rand::prelude::*;
 use rand_os::OsRng;
@@ -475,13 +474,13 @@ pub fn aes_encrypter(file_path: String, pconfig: Config, to_user: String) -> Fil
     }
 
     //loading private key
-    let key = open_private_key(&pconfig).unwrap();
+    let private_key = open_private_key(&pconfig).unwrap();
 
     //Getting public key of sending user
     let user_public_key = open_receiver_public_key(&to_user, &pconfig).unwrap();
 
     //Generating the shared secret
-    let s_key = create_shared_secret(key, user_public_key).unwrap();
+    let s_key = create_shared_secret(private_key, user_public_key).unwrap();
 
     //opening file to encrypt
     let path_expansion = shellexpand::full(&file_path)
@@ -524,18 +523,18 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
     //checking keys in postio config
     check_config_files_config(&pconfig).expect("Error, something is wrong with your config file");
 
-    //randomizing IV (16 bytes)
-    for _ in 0..16 {
+    //randomizing IV (24 bytes)
+    for _ in 0..24 {
         iv.push(rng.gen::<u8>());
     }
 
-    let key = open_private_key(&pconfig).unwrap();
+    let private_key = open_private_key(&pconfig).unwrap();
 
     //Getting receiver Public Key
     let user_public_key = open_receiver_public_key(&to_user, &pconfig).unwrap();
 
     //Generating the shared secret
-    let s_key = create_shared_secret(key, user_public_key).unwrap();
+    let s_key = create_shared_secret(private_key, user_public_key).unwrap();
 
     //opening file to encrypt
     let path_expansion = shellexpand::full(&file_path)
@@ -548,7 +547,12 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
         .read_to_end(&mut file_buffer)
         .expect("Unable to read file");
 
-    let encrypted_file = encrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &file_buffer);
+    let key = GenericArray::clone_from_slice(s_key.as_bytes());
+    let aead = XChaCha20Poly1305::new(key);
+
+    let nonce = GenericArray::clone_from_slice(&iv);
+
+    let encrypted_file = aead.encrypt(&nonce, file_buffer.as_ref()).expect("encryption failure!");
 
     //Preparing to put the user hash into the file blob
     let mut hasher = Sha3_512::new();
@@ -558,7 +562,7 @@ pub fn chacha_encrypter(file_path: String, pconfig: Config, to_user: String) -> 
 
     //putting file, IV, together into a blob and sending to AWS S3
     let file_blob_for_aws: FileBlob = FileBlob {
-        file: encrypted_file.unwrap(),
+        file: encrypted_file,
         iv: iv,
         from: user_sha_string,
     };
@@ -604,7 +608,7 @@ pub fn aes_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_conf
 pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_config: Config) {
     //disecting fileblob from AWS
     let encrypted = file_from_aws.file;
-    let key = open_private_key(&postio_config).unwrap();
+    let private_key = open_private_key(&postio_config).unwrap();
     let iv = file_from_aws.iv;
     let from_user = file_from_aws.from;
 
@@ -619,17 +623,20 @@ pub fn chacha_decrypter(out_file_path: String, file_from_aws: FileBlob, postio_c
     let user_public_key = open_sender_public_key(&from_user, &postio_config).unwrap();
 
     //Generating the shared secret
-    let s_key = create_shared_secret(key, user_public_key).unwrap();
+    let s_key = create_shared_secret(private_key, user_public_key).unwrap();
+    let key = GenericArray::clone_from_slice(s_key.as_bytes());
+    let aead = XChaCha20Poly1305::new(key);
 
-    //decrypting file with iv,key
-    let unencrypted = decrypt(Cipher::chacha20(), s_key.as_bytes(), Some(&iv), &encrypted);
+    //decrypt file with shared key
+    let nonce = GenericArray::clone_from_slice(&iv);
+    let unencrypted = aead.decrypt(&nonce, encrypted.as_ref()).expect("decryption failure!");
 
     //writing file out
     let fileout = Path::new(&out_file_holder);
     let mut decrypted_file_path = File::create(fileout).expect("Unable to write file to disk");
-    decrypted_file_path
-        .write_all(&unencrypted.unwrap())
-        .expect("unable to write encrypted file");
+        decrypted_file_path
+            .write_all(&unencrypted)
+            .expect("unable to write encrypted file");
 }
 
 //Loads environmental variables for access to the S3 instances
@@ -702,7 +709,16 @@ pub fn add_users_folder(user: &String, region_input: &String, bucket_name: &Stri
 
     let (_, code) = bucket.put_object(&user_sha_string, &blank.as_bytes(), "text/plain")?;
     
-    Ok(())
+    if code != 200 {
+        println!(
+            "Sorry there was an error adding the user bucket S3 HTTP code: {}",
+            code
+        );
+
+        Err(S3Error::from_kind(EK::Msg("Error: Non-200 response code while uploading file".to_string())))
+    } else {
+        Ok(())
+    }
 }
 
 //List files in queue
